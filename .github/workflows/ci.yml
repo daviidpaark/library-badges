@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE"]
+  pull_request:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Userscript
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check JavaScript syntax
+        run: node --check library-badges.user.js
+
+      - name: Check version matches CHANGELOG
+        run: |
+          version=$(grep -oP '^// @version\s+\K\S+' library-badges.user.js)
+          grep -q "const VERSION = \"$version\";" library-badges.user.js || { echo "VERSION constant does not match @version $version"; exit 1; }
+          grep -q "^## \[$version\]" CHANGELOG.md || { echo "CHANGELOG.md has no section for $version"; exit 1; }
