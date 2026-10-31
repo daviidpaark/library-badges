@@ -5,6 +5,11 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-10-31
+
+### Fixed
+- **YouTube Search:** A video's icon sits on its thumbnail's top-left corner instead of below the thumbnail, where it looked like it belonged to the next result. It stays there while the hover preview plays, and the preview no longer takes the video's place in the counter's list.
+
 ## [0.1.0] - 2026-10-28
 
 ### Added

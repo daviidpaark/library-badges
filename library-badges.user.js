@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.0
+// @version      0.1.1
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -28,7 +28,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.0";
+  const VERSION = "0.1.1";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
   const INDEX_VERSION = 13;
@@ -1088,7 +1088,7 @@
     .lbm svg { width: 13px !important; height: 13px !important; display: block; }
     .lbm a:hover { filter: brightness(1.3); }
     .lbm.lbm-poster { position: absolute !important; z-index: 5; margin: 4px 0 0 4px !important; }
-    yt-thumbnail-view-model > .lbm.lbm-poster { top: 0; left: 0; }
+    ytd-thumbnail > .lbm.lbm-poster, yt-thumbnail-view-model > .lbm.lbm-poster { top: 0; left: 0; }
     .lbm.lbm-get { position: relative; border: 1px dashed #6b7280; color: #d1d5db !important; font: 700 11px/13px system-ui, -apple-system, "Segoe UI", sans-serif !important; }
     .lbm.lbm-poster + .lbm.lbm-poster { margin-top: 30px !important; }
     .lbm.lbm-arr { border: 1px dashed #6b7280; }
@@ -1896,13 +1896,15 @@
   }
 
   // YouTube reuses thumbnail elements for other videos as you browse, so each thumbnail remembers which video it was marked for.
+  // The hover preview covers the thumbnail, so it gets its own marker, but the thumbnail is the one the counter lists.
   function scanYoutube(index, hrefs) {
     trackTallyPage();
     const seen = new WeakSet();
     for (const link of document.querySelectorAll('a[href*="/watch?v="], a[href^="/shorts/"]')) {
       const href = link.getAttribute("href");
       const video = href.match(/[?&]v=([\w-]{11})/)?.[1] || href.match(/^\/shorts\/([\w-]{11})/)?.[1];
-      if (!video || !link.querySelector("img")) continue;
+      const preview = link.closest("ytd-video-preview");
+      if (!video || !(preview || link.querySelector("img"))) continue;
       const renderer = link.closest("ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer") || link.closest("yt-lockup-view-model");
       const poster = link.closest("ytd-thumbnail") || link.querySelector("ytd-thumbnail, yt-thumbnail-view-model") || link;
       const target = renderer || poster;
@@ -1920,7 +1922,7 @@
       }
       const label = renderer?.querySelector("#video-title, h3, .yt-lockup-metadata-view-model__title")?.textContent.trim() || link.title || video;
       const note = owned ? ownedNote("videos", group, null) : null;
-      countItem(video, owned, { label, el: link, how: "video ID", note });
+      if (!preview) countItem(video, owned, { label, el: link, how: "video ID", note });
       if (owned) placeMarker(link, owned, hrefs, "video ID", poster, note);
     }
   }
