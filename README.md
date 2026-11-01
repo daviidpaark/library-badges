@@ -24,7 +24,7 @@ Libraries: Navidrome, Plex, Jellyfin, Spotify (through [spicetify-library](https
 | Films and shows | Letterboxd | TMDB ID on film pages; title and year on lists, with a match one year off confirmed against the film's TMDB ID |
 | YouTube videos | YouTube | Video ID (see [YouTube libraries](#youtube-libraries)) |
 
-Every site gets badges on its item pages and icons on its list pages. On Discogs, each album is marked once: its expanded versions and the version tables on master and release pages are left alone. The Fork and The Drop have no album pages, so their review dialog gets the badges.
+Every site gets badges on its item pages and icons on its list pages. Each album is marked once: Discogs' expanded versions and version tables are left alone, and RateYourMusic's Issues lists and MusicBrainz release groups only mark the digital version closest to each library's copy (the same title, then the same edition wording, then the first listed, which on RateYourMusic is the primary issue). On MusicBrainz, a copy tagged with a release ID marks that exact release, whatever its format. The Fork and The Drop have no album pages, so their review dialog gets the badges.
 
 ## Item pages
 
@@ -57,11 +57,11 @@ Every item on a list page gets one of three marks, in the corner of its cover or
 | --- | --- |
 | Library icons | You have it. Click an icon to open it there. Films, shows and videos you've watched add a green **✓**; a show Sonarr says is missing episodes adds how many you have, such as "50/62". |
 | Radarr or Sonarr icon, dashed | Not in your library yet, but Radarr or Sonarr has it, so it's on its way. Dimmed when it isn't monitored. Needs the service's API key. |
-| **↓**, dashed | Missing. Opens it in your default downloader; **▾** next to it lists the others. Albums use Deemix, Tidarr, slskd or Bandcamp, films Radarr, shows Sonarr. |
+| **↓**, dashed | Missing. Opens it in your default downloader; **▾** next to it lists the others. Albums use Deemix, Tidarr, slskd or Bandcamp, films Radarr, shows Sonarr. Letterboxd posters offer both Radarr and Sonarr, since they don't say which an item is. |
 
 Albums you have elsewhere but not in Navidrome, where downloads land, get both their library icons and the ↓.
 
-The **counter** in the bottom-right corner shows how many items on the page you have and how many are on the way. On a Letterboxd director's, actor's or list page, that's how complete it is in your library. Click it to list the page's items, grouped as in your library, on the way and missing:
+The **counter** in the bottom-right corner shows how many items on the page you have and how many are on the way (items Radarr or Sonarr has but doesn't monitor count as missing). On a Letterboxd director's, actor's or list page, that's how complete it is in your library. Click it to list the page's items, grouped as in your library, on the way and missing:
 
 - Filter to one group with the buttons at the top.
 - **Copy missing** copies what you still need, one per line as the page names it (for example "Artist – Album" or "Title (Year)"), for pasting into a search.
@@ -92,13 +92,13 @@ You can use download or request links without configuring a library; ownership b
 
 ### The library index
 
-Pages match against an index of each whole library, built the first time you open a supported page (a few seconds) and cached for six hours. Every 15 minutes a quick check looks at the newest addition, and for films and videos the newest watch, and rebuilds the index in the background when something changed. **Refresh library index** in the userscript menu rebuilds it right away.
+Pages match against an index of each whole library, built the first time you open a supported page (a few seconds) and cached for six hours. Every 15 minutes a quick check looks at the newest addition, and for films and videos the newest watch, and rebuilds the index in the background when something changed. If a service can't be reached, the last good index stays and the rebuild is retried every 15 minutes. **Refresh library index** in the userscript menu rebuilds it right away.
 
 Radarr's and Sonarr's lists, used for the "on its way" icons, are cached for 30 minutes. Clicking a film's or show's ↓ expires that cache, so after adding it and coming back to the tab the icon updates.
 
 ### Grouping across services
 
-Copies of the same item on different services are grouped by MusicBrainz, TMDB, IMDb or TVDB ID (as written by Picard, beets, Plex and Jellyfin), by matching artist and title, or by a title only one album has on each service. So an album shows every service that has it, even when Plex credits "Various Artists" or Spotify credits the composer.
+Copies of the same item on different services are grouped by MusicBrainz, TMDB, IMDb or TVDB ID (as written by Picard, beets, Plex and Jellyfin), by matching artist and title, or by a title only one album has on each service, when they share an artist or one is credited to "Various Artists". So an album shows every service that has it, even when Plex credits "Various Artists".
 
 ### Title matching
 
@@ -112,7 +112,7 @@ Titles are compared without the wording that varies between editions and service
 
 Artists named differently from the library still match the same title: a full name finds the library's shorter one ("Stella Katherine Cole" finds "Stella Cole", "Samia Finnerty" finds "Samia"), a family name written first finds the usual order ("Aoba Ichiko" finds "Ichiko Aoba"), a library name with a disambiguation suffix is found without it ("Ugly" finds "Ugly (UK)"), and a compilation credited to "Various" finds the one album in your library with that title. A release that combines two ("Towards The End / Where To Find Me", "Folklore I & II") counts when you have either part, and a title also finds a longer library title by the same artist that ends with it ("Louder, Please" finds "A Little Louder, Please").
 
-When no title matches exactly, an album by the same artist whose title continues the page's title counts too, so "BRAT" finds "Brat and it's completely different but also still brat". A separate remix, instrumental, a cappella, live or demo album ("Mordechai Remixes") never stands in for the original.
+When no title matches exactly, an album by the same artist whose title continues the page's title counts too, so "BRAT" finds "Brat and it's completely different but also still brat". A separate remix, instrumental, a cappella, live, demo or numbered album ("Mordechai Remixes", "Led Zeppelin IV") never stands in for the original.
 
 ### YouTube libraries
 

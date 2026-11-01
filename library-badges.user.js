@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.1
+// @version      0.1.2
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -28,10 +28,10 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.1";
+  const VERSION = "0.1.2";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
-  const INDEX_VERSION = 13;
+  const INDEX_VERSION = 16;
   const FRESHNESS_CHECK = 15 * 60 * 1000;
 
   // YouTube only accepts HTML strings through a Trusted Types policy.
@@ -447,11 +447,11 @@
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .replace(/['"’“”`]/g, "")
-      .replace(/\s*[([{][^)\]}]*(deluxe|expanded|anniversary|remaster|special|bonus|clean|explicit|edition|re-?issue|reissue|mono|stereo|version|cut|box set|collector|live|\bb[\s-]?sides?\b|\bfeat\b|\bft\b|\bwith\b)[^)\]}]*[)\]}]/gi, "")
+      .replace(/\s*[([{][^)\]}]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|special|bonus|clean|explicit|editions?|re-?issue|mono|stereo|versions?|cuts?|box set|collectors?|b[\s-]?sides?|feat|ft|with)\b[^)\]}]*[)\]}]/gi, "")
       .replace(/\s*[([{]\s*(?:the\s+)?(?:original\s+|official\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+|television\s+|tv\s+|series\s+)?(?:soundtrack|score|ost)\s*[)\]}]/gi, "")
       .replace(/\s*[([{]\s*(?:original\s+)?music\s+(?:from|for)\s+(?:and\s+inspired\s+by\s+)?(?:the\s+)?(?:original\s+)?(?:motion\s+picture|film|series|game)\b[^)\]}]*[)\]}]/gi, "")
       .replace(/(\S)\s+(?:original\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+)?soundtrack\s*$/i, "$1")
-      .replace(/\s*[-:–—]\s*[^-:–—]*(deluxe|expanded|anniversary|remaster|edition|re-?issue|reissue|\bb[\s-]?sides?\b)[^-:–—]*$/gi, "")
+      .replace(/\s*[-:–—]\s*[^-:–—]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|editions?|re-?issue|b[\s-]?sides?)\b[^-:–—]*$/gi, "")
       .replace(/\s*[([{]\d{4}[)\]}]/g, "")
       .replace(/([-:–—]\s*)(?:recorded\s+)?live\s+(?:at|from|in)\s+(?:the\s+)?/gi, (wording, separator) => (keepLive ? wording : separator))
       .replace(/\s*\+\s*/g, " and ")
@@ -463,7 +463,7 @@
 
   // Title keys for matching, with and without a leading artist name.
   function titleKeys(artist, title) {
-    const key = matchKey(normalizeTitle(title));
+    const key = matchKey(normalizeTitle(title)) || symbolKey(title);
     const prefix = matchKey(artist);
     return prefix && key.length > prefix.length && key.startsWith(prefix) ? [key, key.slice(prefix.length)] : [key];
   }
@@ -521,7 +521,7 @@
       const m = (await this.get(s, `/library/metadata/${id}`))?.MediaContainer?.Metadata?.[0];
       if (!m) return null;
       if (m.type === "show") return { seasons: m.childCount, episodes: m.leafCount, watched: m.leafCount > 0 && m.viewedLeafCount === m.leafCount };
-      const media = m.Media?.[0];
+      const media = widest(m.Media, (version) => version.width);
       const streams = media?.Part?.[0]?.Stream || [];
       const video = streams.find((stream) => stream.streamType === 1);
       const range = video?.DOVIPresent ? "Dolby Vision" : /smpte2084|arib-std-b67/.test(video?.colorTrc || "") ? "HDR" : "";
@@ -594,6 +594,11 @@
 
   const RESOLUTIONS = { "4k": "4K", 1080: "1080p", 720: "720p", 576: "576p", 480: "480p", sd: "SD" };
 
+  // A film can have several versions; its details describe the best one.
+  function widest(versions, widthOf) {
+    return (versions || []).reduce((best, version) => ((widthOf(version) || 0) > (widthOf(best) || 0) ? version : best), versions?.[0]);
+  }
+
   // Widescreen films are short and 4:3 films are narrow, so either dimension can decide.
   function resolutionOf(width, height) {
     if (!width && !height) return "";
@@ -607,7 +612,7 @@
     const name = String(path || "").split(/[\\/]/).pop();
     const match = name.match(/^\[([\w-]{11})\]|\[([\w-]{11})\]\.\w+$/);
     const id = match?.[1] || match?.[2];
-    return id && !/^(?:WEB|Blu|HDTV|DVD|Remux|SDTV|Raw)/i.test(id) ? id : null;
+    return id && !/^(?:WEB|Blu|HDTV|DVD|Remux|SDTV|Raw|tmdb|imdb|tvdb|x26[45]|h26[45]|HEVC|AVC|HDR)|\d{3,4}[pi](?![a-z0-9])/i.test(id) ? id : null;
   }
 
   function plexHref(machine, id) {
@@ -650,7 +655,7 @@
         const episodes = await this.items(s, { ParentId: id, IncludeItemTypes: "Episode", Fields: "", EnableImages: "false", ...(userId ? { userId } : {}) });
         return { seasons: item.ChildCount, episodes: episodes.length, watched: !!item.UserData?.Played };
       }
-      const source = item.MediaSources?.[0];
+      const source = widest(item.MediaSources, (version) => version.MediaStreams?.find((stream) => stream.Type === "Video")?.Width);
       const streams = source?.MediaStreams || [];
       const video = streams.find((stream) => stream.Type === "Video");
       const rangeType = String(video?.VideoRangeType || "");
@@ -874,8 +879,14 @@
       .replace(/[^\p{L}\p{N}]/gu, "");
   }
 
+  // Names made only of symbols ("÷", "×", "!!!") have no letters to compare, so they keep their symbols.
+  function symbolKey(text) {
+    const raw = String(text || "").normalize("NFKC").replace(/\s+/g, "").toLowerCase();
+    return matchKey(text) || (raw && `~${raw}`);
+  }
+
   function albumKeys(artist, title) {
-    return titleKeys(artist, title).map((key) => `${matchKey(artist)}|${key}`);
+    return titleKeys(artist, title).map((key) => `${symbolKey(artist)}|${key}`);
   }
 
   function filmKey(title, year) {
@@ -891,7 +902,7 @@
   }
 
   function indexSignature(s, kind) {
-    return JSON.stringify(INDEX_SOURCES[kind].filter(([, server]) => server.configured(s)).map(([code]) => code).concat(INDEX_VERSION, s.navidromeUrl, s.plexUrl, s.jellyfinUrl, s.spicetifyLibraryUrl));
+    return JSON.stringify(INDEX_SOURCES[kind].filter(([, server]) => server.configured(s)).map(([code]) => code).concat(INDEX_VERSION, s.navidromeUrl, s.navidromeUser, s.navidromePassword, s.plexUrl, s.plexToken, s.jellyfinUrl, s.jellyfinApiKey, s.jellyfinUser, s.spicetifyLibraryUrl));
   }
 
   function filmIdKeys(film) {
@@ -920,10 +931,14 @@
   const LATEST = {
     n: async (s) => (await navidrome.call(s, "getAlbumList2", { type: "newest", size: "1" })).albumList2?.album?.[0]?.id,
     p: async (s, kind) => {
-      const added = (await plex.get(s, "/library/recentlyAdded?X-Plex-Container-Start=0&X-Plex-Container-Size=1"))?.MediaContainer?.Metadata?.[0]?.ratingKey;
-      if (kind === "music") return added;
-      const viewed = (await plex.get(s, "/status/sessions/history/all?sort=viewedAt:desc&X-Plex-Container-Start=0&X-Plex-Container-Size=1").catch(() => null))?.MediaContainer?.Metadata?.[0]?.viewedAt;
-      return `${added}|${viewed || ""}`;
+      const newest = "X-Plex-Container-Start=0&X-Plex-Container-Size=1";
+      const first = (data) => data?.MediaContainer?.Metadata?.[0];
+      const sections = (await Promise.all((kind === "music" ? ["artist"] : ["movie", "show"]).map((type) => plex.sections(s, type)))).flat();
+      const added = await Promise.all(sections.map((key) => plex.get(s, `/library/sections/${key}/all?${kind === "music" ? "type=9&" : ""}sort=addedAt:desc&${newest}`)));
+      const addedKeys = added.map((data) => first(data)?.ratingKey || "").join(",");
+      if (kind === "music") return addedKeys;
+      const viewed = await Promise.all(sections.map((key) => plex.get(s, `/status/sessions/history/all?librarySectionID=${key}&sort=viewedAt:desc&${newest}`).catch(() => null)));
+      return `${addedKeys}|${viewed.map((data) => first(data)?.viewedAt || "").join(",")}`;
     },
     j: async (s, kind) => {
       const added = (await jellyfin.items(s, { SortBy: "DateCreated", SortOrder: "Descending", Limit: "1", IncludeItemTypes: kind === "music" ? "MusicAlbum" : "Movie,Series" }))[0]?.Id;
@@ -942,7 +957,12 @@
 
   // Groups each album's copies across services, so a match on any service's naming shows every service.
   // Copies are grouped by a shared artist and title, a shared MusicBrainz, TMDB or IMDb ID, or a title that only one album has
-  // on each service (Plex and Spotify often credit a different artist, such as "Various Artists" or the composer).
+  // on each service, when one of them is credited to "Various Artists" or they share an artist.
+  function sharedCredit(a, b) {
+    const open = (record) => !record.artists.length || record.artists.some((artist) => /^various(?:artists)?$/.test(artist));
+    return open(a) || open(b) || a.artists.some((artist) => b.artists.includes(artist));
+  }
+
   async function buildIndex(s, kind) {
     const sources = INDEX_SOURCES[kind].filter(([, server]) => server.configured(s));
     const [results, markers] = await Promise.all([
@@ -966,6 +986,8 @@
           ids: [item.releaseId, item.groupId].filter(Boolean),
           title: music ? matchKey(normalizeTitle(item.title)) : "",
           name: music ? normalizeTitle(item.title, true) : "",
+          original: music ? item.title : "",
+          release: (music && item.releaseId) || "",
           artists: music ? [...new Set(artistVariants(item).map(matchKey))] : [],
           label: recordLabel(kind, item),
           watched: !!item.watched,
@@ -997,7 +1019,10 @@
     });
     for (const list of byTitle.values()) {
       const codes = list.map((i) => records[i].code);
-      if (list.length > 1 && new Set(codes).size === codes.length) for (const i of list.slice(1)) parent[find(i)] = find(list[0]);
+      if (list.length < 2 || new Set(codes).size !== codes.length) continue;
+      list.forEach((i, position) => {
+        for (const j of list.slice(position + 1)) if (sharedCredit(records[i], records[j])) parent[find(j)] = find(i);
+      });
     }
 
     const groups = [];
@@ -1011,33 +1036,42 @@
         groups.push({ _: record.label });
       }
       const group = groupOf.get(root);
-      if (!groups[group][record.code]) groups[group][record.code] = record.id;
+      if (!groups[group][record.code]) {
+        groups[group][record.code] = record.id;
+        if (record.original) (groups[group].v ||= {})[record.code] = record.original;
+        if (record.release) (groups[group].r ||= {})[record.code] = record.release;
+      }
       if (record.watched) groups[group].w = 1;
       for (const key of record.keys) {
         if (!(key in entries)) entries[key] = group;
       }
       for (const artist of record.artists) {
-        if (!titlesByArtist[artist]) titlesByArtist[artist] = [];
+        if (!Object.hasOwn(titlesByArtist, artist)) titlesByArtist[artist] = [];
         if (!titlesByArtist[artist].some(([name, g]) => name === record.name && g === group)) titlesByArtist[artist].push([record.name, group]);
       }
     });
-    const index = { sig: indexSignature(s, kind), builtAt: Date.now(), entries, groups, titlesByArtist, markers, errors };
-    GM_setValue(`index:${kind}`, index);
+    const sig = indexSignature(s, kind);
     GM_setValue(`indexChecked:${kind}`, Date.now());
     for (const [code, message] of Object.entries(errors)) console.warn(`[Library Badges] ${SERVER_NAMES[code]} index failed: ${message}`);
+    // A service that had data and can't be reached right now doesn't wipe it: the last good index stays until a rebuild works.
+    const previous = GM_getValue(`index:${kind}`, null);
+    if (previous?.sig === sig && Object.keys(errors).some((code) => !previous.errors?.[code])) return { ...previous, errors };
+    const index = { sig, builtAt: Date.now(), entries, groups, titlesByArtist, markers, errors };
+    GM_setValue(`index:${kind}`, index);
     return index;
   }
 
-  // Returns a cached index right away when there is one. It is rebuilt in the background when it expires, or sooner
-  // when a quick check (at most every 15 minutes) shows something new was added to a library.
+  // Returns a cached index right away when there is one. At most every 15 minutes, across all tabs, it is rebuilt in the
+  // background if it expired or a service failed last time, or if a quick check shows something new in a library.
   async function loadIndex(s, kind, onRebuilt) {
     const stored = GM_getValue(`index:${kind}`, null);
     if (!stored || stored.sig !== indexSignature(s, kind)) return buildIndex(s, kind);
+    if (Date.now() - GM_getValue(`indexChecked:${kind}`, 0) <= FRESHNESS_CHECK) return stored;
+    GM_setValue(`indexChecked:${kind}`, Date.now());
     const rebuild = () => buildIndex(s, kind).then(onRebuilt, () => {});
-    if (Date.now() - stored.builtAt > INDEX_TTL) {
+    if (Date.now() - stored.builtAt > INDEX_TTL || Object.keys(stored.errors || {}).length) {
       rebuild();
-    } else if (Date.now() - GM_getValue(`indexChecked:${kind}`, 0) > FRESHNESS_CHECK) {
-      GM_setValue(`indexChecked:${kind}`, Date.now());
+    } else {
       latestMarkers(s, kind).then((markers) => {
         if (Object.entries(markers).some(([code, value]) => value !== null && value !== stored.markers?.[code])) rebuild();
       });
@@ -1083,15 +1117,14 @@
   const MARK_STYLE = `
     .lbm { display: inline-flex !important; align-items: center; gap: 4px; margin: 0 0 0 6px !important; padding: 3px 4px !important; border-radius: 4px;
       width: max-content !important; align-self: flex-start;
-      background: rgba(12, 13, 18, 0.85) !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45); vertical-align: middle; line-height: 0; }
+      background: rgba(12, 13, 18, 0.85) !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45); vertical-align: calc(var(--lbm-text, 1em) * 0.36 - 6.5px); line-height: 0; }
     .lbm a { display: inline-flex !important; line-height: 0; border: none !important; text-decoration: none !important; }
     .lbm svg { width: 13px !important; height: 13px !important; display: block; }
     .lbm a:hover { filter: brightness(1.3); }
     .lbm.lbm-poster { position: absolute !important; z-index: 5; margin: 4px 0 0 4px !important; }
     ytd-thumbnail > .lbm.lbm-poster, yt-thumbnail-view-model > .lbm.lbm-poster { top: 0; left: 0; }
-    .lbm.lbm-get { position: relative; border: 1px dashed #6b7280; color: #d1d5db !important; font: 700 11px/13px system-ui, -apple-system, "Segoe UI", sans-serif !important; }
-    .lbm.lbm-poster + .lbm.lbm-poster { margin-top: 30px !important; }
-    .lbm.lbm-arr { border: 1px dashed #6b7280; }
+    .lbm.lbm-get { position: relative; vertical-align: calc(var(--lbm-text, 1em) * 0.36 - 4.5px); border: 1px dashed #6b7280; color: #d1d5db !important; font: 700 11px/13px system-ui, -apple-system, "Segoe UI", sans-serif !important; }
+    .lbm.lbm-poster + .lbm.lbm-poster { margin-top: 30px !important; }    .lbm.lbm-arr { border: 1px dashed #6b7280; }
     .lbm-progress { color: #fbbf24; font: 700 10px/13px system-ui, -apple-system, "Segoe UI", sans-serif; }
     .lbm-watched { color: #10b981; font: 700 11px/13px system-ui, -apple-system, "Segoe UI", sans-serif; }
     .lbm-dimmed img { opacity: 0.3 !important; transition: opacity 0.15s; }
@@ -1163,7 +1196,13 @@
   }
 
   function slugText(slug) {
-    return decodeURIComponent(slug).replace(/[-_]+/g, " ");
+    let text = slug;
+    try {
+      text = decodeURIComponent(slug);
+    } catch {
+      text = slug;
+    }
+    return text.replace(/[-_]+/g, " ");
   }
 
   function lookupGroup(index, keys) {
@@ -1171,17 +1210,18 @@
     return null;
   }
 
-  const COMPANION_ONLY = /^(?:the\s+)?(?:remix(?:es|ed)?|instrumentals?|a\s*cappellas?|acapellas?|live\b.*|demos?)$/;
+  const COMPANION_ONLY = /^(?:the\s+)?(?:remix(?:es|ed)?|instrumentals?|a\s*cappellas?|acapellas?|live\b.*|demos?)$|^(?:(?:part|pt|vol|volume|disc|book|chapter)\s+)?(?:\d+|[ivx]+)$/;
 
   // Matches by artist and title. When no title matches exactly, a library album by the same artist whose title
   // continues the release's title counts too, so "BRAT" finds a library copy of "Brat and it's completely different
-  // but also still brat", but a separate remix or instrumental album never stands in for the original. A title of two
+  // but also still brat", but a separate remix, instrumental or numbered album never stands in for the original. A title of two
   // or more words also finds one the library's title ends with ("Louder, Please" and "A Little Louder, Please").
   function lookupAlbum(index, artists, titles, parts = true) {
     const exact = lookupGroup(index, artists.flatMap((artist) => titles.flatMap((title) => albumKeys(artist, title))));
     if (exact) return exact;
     for (const artist of artists) {
-      const albums = index.titlesByArtist?.[matchKey(artist)] || [];
+      const artistKey = matchKey(artist);
+      const albums = index.titlesByArtist && Object.hasOwn(index.titlesByArtist, artistKey) ? index.titlesByArtist[artistKey] : [];
       for (const title of titles) {
         const name = normalizeTitle(title, true);
         if (name.length < 3) continue;
@@ -1249,7 +1289,9 @@
 
   function lookupRelease(index, artistSlug, titleSlug, text, extraArtists = []) {
     const title = slugText(titleSlug);
-    return lookupAlbum(index, [slugText(artistSlug), ...extraArtists], [text, title, title.replace(/\s\d+$/, "")]);
+    // A number the page's title doesn't have only tells the link apart from another release's ("hello-1").
+    const titles = /\d$/.test(text) ? [text, title] : [text, title, title.replace(/\s\d+$/, "")];
+    return lookupAlbum(index, [slugText(artistSlug), ...extraArtists], titles);
   }
 
   // A film in the same year is a match; one a year off (release dates differ between sites) is only a candidate.
@@ -1285,17 +1327,28 @@
     return false;
   }
 
+  function linkUrl(link) {
+    try {
+      return new URL(link.href, location.href);
+    } catch {
+      return null;
+    }
+  }
+
   // Counts the items on a list or grid page that are in a library, shown in the corner of the page. Clicking the
   // counter lists them, with the ones you have first; a name scrolls to the item on the page.
-  const tally = { items: new Map(), host: null, open: false, filter: "", hrefs: null, settings: null };
+  const tally = { items: new Map(), host: null, open: false, filter: "", hrefs: null, settings: null, version: 0, rendered: -1, countHtml: "" };
 
+  // An item Radarr or Sonarr has but doesn't monitor isn't coming, so it still counts as missing.
   function countItem(key, owned, { label = "", el = null, how = "", download = null, note = null } = {}) {
-    const state = owned ? "have" : download?.arr ? "coming" : "missing";
+    const state = owned ? "have" : download?.arr?.[2] ? "coming" : "missing";
     tally.items.set(key, { owned, label: label || key, el, how, download, note, state });
+    tally.version++;
   }
 
   function resetTally() {
     tally.items.clear();
+    tally.version++;
   }
 
   function tallyRow(item) {
@@ -1357,6 +1410,7 @@
       copy.addEventListener("click", () => copyMissing(copy));
       tools.append(copy);
     }
+    const scrollTop = panel.scrollTop;
     panel.replaceChildren(tools);
     for (const [state, heading] of TALLY_STATES) {
       const list = items.filter((item) => item.state === state);
@@ -1367,6 +1421,8 @@
       ul.append(...list.map(tallyRow));
       panel.append(title, ul);
     }
+    panel.scrollTop = scrollTop;
+    tally.rendered = tally.version;
   }
 
   function renderTally() {
@@ -1410,21 +1466,93 @@
     const items = [...tally.items.values()];
     const owned = items.filter((item) => item.state === "have").length;
     const coming = items.filter((item) => item.state === "coming").length;
-    setHtml(tally.host.shadowRoot.querySelector(".count"), `<b>${owned}</b> of ${tally.items.size} on this page in your library${coming ? ` · <i>${coming} on the way</i>` : ""}`);
-    if (tally.open) renderTallyList(tally.host.shadowRoot.querySelector(".panel"));
+    const countHtml = `<b>${owned}</b> of ${tally.items.size} on this page in your library${coming ? ` · <i>${coming} on the way</i>` : ""}`;
+    if (countHtml !== tally.countHtml) {
+      tally.countHtml = countHtml;
+      setHtml(tally.host.shadowRoot.querySelector(".count"), countHtml);
+    }
+    if (tally.open && tally.rendered !== tally.version) renderTallyList(tally.host.shadowRoot.querySelector(".panel"));
+  }
+
+  // A page listing an album's versions marks only the one you have: each library's icon goes on the release its copy is
+  // tagged with, or on the closest digital one by the same title, then the same edition wording, then the first listed.
+  // RateYourMusic gives the primary issue's title link an address ending in ".p/", and it's listed first here.
+  const EDITION_WORDS = /deluxe|expanded|anniversary|remaster|bonus|special|collector|complete|super/gi;
+  const PHYSICAL_FORMAT = /\b(?:vinyl|lp|cd|cassette|sacd|dvd|blu-?ray|minidisc|8-?track|shellac)\b/i;
+
+  function editionOf(title) {
+    return [...new Set(String(title).toLowerCase().match(EDITION_WORDS) || [])].sort().join();
+  }
+
+  function rymDigitalIssues(section) {
+    const issues = [];
+    for (const row of section.querySelectorAll(".issue_info:not(.release_view)")) {
+      const link = [...row.querySelectorAll('a[href*="/release/"]')].find((a) => a.textContent.trim());
+      if (!link) continue;
+      const details = row.textContent.replace(link.textContent, " ");
+      if (/\b(?:digital|streaming)\b/i.test(details) && !PHYSICAL_FORMAT.test(details)) {
+        const title = link.textContent.trim();
+        issues.push({ link, title, edition: title, digital: true, primary: /\.p\/?$/.test(link.getAttribute("href")) });
+      }
+    }
+    return issues.sort((a, b) => Number(b.primary) - Number(a.primary));
+  }
+
+  function closestIssue(issues, title) {
+    return issues.find((issue) => matchKey(issue.title) === matchKey(title)) || issues.find((issue) => editionOf(issue.edition) === editionOf(title)) || issues[0];
+  }
+
+  function markVersions(group, albumTitle, versions, hrefs) {
+    const digital = versions.filter((version) => version.digital);
+    const marks = new Map();
+    for (const [code, id] of Object.entries(orderedOwned(group, "music") || {})) {
+      const tagged = group.r?.[code] && versions.find((version) => version.id === group.r[code]);
+      const version = tagged || closestIssue(digital, group.v?.[code] || albumTitle);
+      if (!version) continue;
+      const mark = marks.get(version) || { owned: {}, how: "closest digital release" };
+      mark.owned[code] = id;
+      if (tagged) mark.how = "MusicBrainz release ID";
+      marks.set(version, mark);
+    }
+    for (const [version, { owned, how }] of marks) placeMarker(version.link, owned, hrefs, how, null);
+  }
+
+  function scanRymIssues(index, hrefs) {
+    // The page can hold more than one copy of the list, not all of them visible.
+    for (const section of document.querySelectorAll(".section_issues")) {
+      const issues = rymDigitalIssues(section);
+      if (alreadyScanned(section, String(issues.length))) continue;
+      for (const old of section.querySelectorAll(".lbm")) old.remove();
+      const album = parseRym();
+      if (!album || !issues.length) continue;
+      const group = lookupGroup(index, album.spotifyIds.map((id) => `spotify:${id}`)) || lookupAlbum(index, album.artists, [album.title]);
+      markVersions(group, album.title, issues, hrefs);
+    }
+  }
+
+  // A title link's cover is the nearby link to the same release that holds an image, when it's big enough for the icons.
+  function rymCover(link) {
+    const href = link.getAttribute("href");
+    let row = link.parentElement;
+    for (let depth = 0; row && depth < 8; depth++, row = row.parentElement) {
+      const cover = [...row.querySelectorAll('a[href*="/release/"]')].find((a) => a.getAttribute("href") === href && a.querySelector("img"));
+      if (cover) return bigCover(cover) ? cover : null;
+    }
+    return null;
   }
 
   // Chart rows carry their own Spotify links, which match exactly; other links fall back to the artist and title in the URL.
   // On an artist page, a collaboration's link names every artist ("laufey-sinfoniuhljomsveit-islands"), so the page's
   // own artist is tried too when the link's artist includes it.
   function scanRym(index, hrefs) {
+    scanRymIssues(index, hrefs);
     const pageSlug = location.pathname.match(/^\/artist\/([^/]+)/)?.[1];
     const pageArtist = pageSlug ? document.querySelector("h1.artist_name_hdr")?.textContent.trim() || slugText(pageSlug) : "";
     for (const link of document.querySelectorAll('a[href*="/release/"]')) {
-      if (link.closest(".release_navigation_guidance")) continue;
+      if (link.closest(".release_navigation_guidance, .section_issues")) continue;
       if (alreadyScanned(link)) continue;
-      const url = new URL(link.href, location.href);
-      const match = url.pathname.match(/^\/release\/[^/]+\/([^/]+)\/([^/]+)\/?$/);
+      const url = linkUrl(link);
+      const match = url?.pathname.match(/^\/release\/[^/]+\/([^/]+)\/([^/]+)\/?$/);
       const text = link.textContent.trim();
       if (!match || !text || url.hostname !== location.hostname || url.pathname === location.pathname) continue;
       const media = link.closest(".page_charts_section_charts_item")?.querySelector('[id^="media_link_button_container"]');
@@ -1433,11 +1561,13 @@
       const group = bySpotify || lookupRelease(index, match[1], match[2], text, collaboration ? [pageArtist] : []);
       const owned = orderedOwned(group, "music");
       const how = bySpotify ? "Spotify album ID" : "artist and title";
-      const download = wantsDownload("music", group, { artists: [slugText(match[1])], title: text, deezerIds: mediaIds(media, "deezer") });
+      const download = wantsDownload("music", group, { artists: [slugText(match[1])], title: text, deezerIds: mediaIds(media, "deezer"), tidalIds: mediaIds(media, "tidal") });
       countItem(url.pathname.replace(/\/$/, ""), owned, { label: `${slugText(match[1])} – ${text}`, el: link, how, download });
+      const cover = rymCover(link);
       removeMarkers(link);
-      if (owned) placeMarker(link, owned, hrefs, how, null);
-      placeGet(link, download, null);
+      if (cover) removeMarkers(cover);
+      if (owned) placeMarker(link, owned, hrefs, how, cover);
+      placeGet(link, download, cover);
     }
   }
 
@@ -1448,8 +1578,8 @@
   let verifyQueue = Promise.resolve();
 
   function letterboxdTmdb(slug) {
-    const cached = GM_getValue(TMDB_CACHE_KEY, {})[slug];
-    if (cached !== undefined) return Promise.resolve(cached);
+    const known = GM_getValue(TMDB_CACHE_KEY, {});
+    if (Object.hasOwn(known, slug)) return Promise.resolve(known[slug]);
     const run = async () => {
       const res = await fetch(`${location.origin}/film/${slug}/`, { credentials: "include" });
       if (!res.ok) return null;
@@ -1469,33 +1599,44 @@
     return result;
   }
 
+  // Posters don't say whether an item is a film or a show, so a missing one offers both Radarr and Sonarr. A check that
+  // finishes after the page was marked again (a rebuilt index) is dropped.
   function scanLetterboxd(index, hrefs) {
     const currentSlug = location.pathname.match(/^\/film\/([^/]+)/)?.[1];
+    const pass = scanned;
     for (const poster of document.querySelectorAll("[data-item-slug][data-item-name]")) {
       if (alreadyScanned(poster, poster.dataset.itemSlug)) continue;
       const slug = poster.dataset.itemSlug;
       const match = poster.dataset.itemName.match(/^(.*)\s\((\d{4})\)$/);
       if (!match || slug === currentSlug) continue;
-      const found = lookupFilm(index, match[1], Number(match[2]));
+      const film = { title: match[1], year: match[2] };
+      const found = lookupFilm(index, film.title, Number(film.year));
       const owned = orderedOwned(found?.group, "films");
       const holder = poster.parentElement;
       const mark = (how) => {
-        const note = ownedNote("films", found.group, { type: "movie", title: match[1], year: match[2] });
+        const note = ownedNote("films", found.group, film);
         countItem(slug, owned, { label: poster.dataset.itemName, el: holder, how, note });
         renderTally();
         placeMarker(holder, owned, hrefs, how, holder, note);
       };
-      if (!owned || !holder) {
-        const download = wantsDownload("films", null, { type: "movie", title: match[1], year: match[2] });
-        countItem(slug, null, { label: poster.dataset.itemName, el: poster, download });
+      const markMissing = () => {
+        const download = wantsDownload("films", null, film);
+        countItem(slug, null, { label: poster.dataset.itemName, el: holder || poster, download });
         if (holder) placeGet(holder, download, holder);
+      };
+      if (!owned || !holder) {
+        markMissing();
       } else if (found.exact) {
         mark("title and year");
       } else {
         countItem(slug, null, { label: poster.dataset.itemName, el: holder });
-        letterboxdTmdb(slug).then((tmdb) => {
-          if (tmdb && lookupGroup(index, [`tmdb:${tmdb}`]) === found.group) mark("TMDB ID");
-        }, () => {});
+        const settle = (tmdb) => {
+          if (scanned !== pass) return;
+          if (tmdb && lookupGroup(index, [`tmdb:${tmdb}`]) === found.group) return mark("TMDB ID");
+          markMissing();
+          renderTally();
+        };
+        letterboxdTmdb(slug).then(settle, () => settle(null));
       }
     }
   }
@@ -1522,6 +1663,8 @@
       else poster.prepend(marker);
       return;
     }
+    // Icons center on the title's capitals, using the title's own size: it's often larger than the element around it.
+    marker.style.setProperty("--lbm-text", getComputedStyle(link).fontSize);
     let after = link;
     while (after.nextElementSibling?.classList.contains("lbm")) after = after.nextElementSibling;
     after.insertAdjacentElement("afterend", marker);
@@ -1625,7 +1768,7 @@
   function downloadLinks(s, { kind, item }) {
     if (!s) return [];
     if (kind === "music") {
-      const album = { artists: item.artists || [], title: item.title, deezerIds: item.deezerIds || [], tidalIds: [] };
+      const album = { artists: item.artists || [], title: item.title, deezerIds: item.deezerIds || [], tidalIds: item.tidalIds || [] };
       const preferred = s.musicDownloader || "d";
       return configuredCodes(s, [["d", deemix], ["t", tidarr], ["k", slskd], ["c", bandcamp]])
         .sort((a, b) => (b === preferred) - (a === preferred))
@@ -1749,8 +1892,8 @@
   function scanBandcamp(index, hrefs) {
     trackTallyPage();
     for (const { item, link, title, artist, poster } of bandcampItems()) {
-      if (!link || !title || !artist) continue;
-      const url = new URL(link.href, location.href);
+      const url = link && linkUrl(link);
+      if (!url || !title || !artist) continue;
       const key = url.origin + url.pathname;
       if (url.pathname === location.pathname || alreadyScanned(item, key)) continue;
       for (const old of item.querySelectorAll(".lbm")) old.remove();
@@ -1778,23 +1921,27 @@
   function linkTwins(link, selector, key, keyOf, skip) {
     let row = link.parentElement;
     for (let depth = 0; row && depth < 4; depth++, row = row.parentElement) {
-      const twins = [...row.querySelectorAll(selector)].filter((other) => other !== link && !other.closest(skip) && keyOf(new URL(other.href, location.href)) === key);
+      const twins = [...row.querySelectorAll(selector)].filter((other) => {
+        const url = other !== link && !other.closest(skip) && linkUrl(other);
+        return url && keyOf(url) === key;
+      });
       if (twins.length) return twins;
     }
     return [];
   }
 
+  function bigCover(el) {
+    const img = el.querySelector("img");
+    return !!img && (Number(img.getAttribute("width")) || img.getBoundingClientRect?.().width || el.parentElement?.getBoundingClientRect?.().width || 0) >= 100;
+  }
+
   function preferredLink(link, twins) {
     const cover = (el) => !!el.querySelector("img");
-    const big = (el) => {
-      const img = el.querySelector("img");
-      return !!img && (Number(img.getAttribute("width")) || img.getBoundingClientRect?.().width || el.parentElement?.getBoundingClientRect?.().width || 0) >= 100;
-    };
     const titles = twins.filter((twin) => !cover(twin) && twin.textContent.trim());
-    if (cover(link)) return big(link) || !titles.length;
+    if (cover(link)) return bigCover(link) || !titles.length;
     // An empty link (a cover with no art) never carries the marker while the item has a title link.
     if (!link.textContent.trim()) return !titles.length && !twins.some(cover);
-    return !twins.some(big) && !titles.some((twin) => twin.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING);
+    return !twins.some(bigCover) && !titles.some((twin) => twin.compareDocumentPosition(link) & Node.DOCUMENT_POSITION_FOLLOWING);
   }
 
   function linkScanner(selector, kind, keyOf, find, exclude = "") {
@@ -1803,8 +1950,8 @@
       trackTallyPage();
       const current = keyOf(new URL(location.href));
       for (const link of document.querySelectorAll(selector)) {
-        const url = new URL(link.href, location.href);
-        const key = url.hostname === location.hostname ? keyOf(url) : null;
+        const url = linkUrl(link);
+        const key = url?.hostname === location.hostname ? keyOf(url) : null;
         if (!key || key === current || link.closest(skip) || alreadyScanned(link, key)) continue;
         removeMarkers(link);
         const twins = linkTwins(link, selector, key, keyOf, skip);
@@ -1824,15 +1971,51 @@
     };
   }
 
-  const scanMusicBrainz = linkScanner('a[href*="/release-group/"], a[href*="/release/"]', "music",
-    (url) => url.pathname.match(/^\/release(?:-group)?\/([0-9a-f-]{36})\/?$/)?.[1],
+  // A release group's table lists every version of one album; its "Format" column says which are digital.
+  function scanMusicBrainzReleases(index, hrefs) {
+    if (!location.pathname.startsWith("/release-group/")) return;
+    const table = document.querySelector("#content table.tbl");
+    if (!table) return;
+    const format = [...table.querySelectorAll("thead th")].findIndex((th) => th.textContent.trim() === "Format");
+    const versions = [];
+    for (const row of table.querySelectorAll("tbody tr")) {
+      const link = [...row.querySelectorAll('a[href^="/release/"]')].find((a) => a.textContent.trim());
+      if (!link) continue;
+      const title = link.textContent.trim();
+      versions.push({
+        link,
+        title,
+        edition: `${title} ${row.querySelector(".comment")?.textContent || ""}`,
+        id: link.getAttribute("href").match(/\/release\/([0-9a-f-]{36})/)?.[1],
+        digital: /^(?:\d+×)?Digital Media$/.test(row.children[format]?.textContent.trim() || ""),
+      });
+    }
+    if (alreadyScanned(table, String(versions.length))) return;
+    for (const old of table.querySelectorAll(".lbm")) old.remove();
+    const album = parseMusicBrainz();
+    if (!album || !versions.length) return;
+    const group = lookupGroup(index, [...album.mbids, ...versions.map((version) => version.id)].map((id) => `mb:${id}`)) || lookupAlbum(index, album.artists, [album.title]);
+    markVersions(group, album.title, versions, hrefs);
+  }
+
+  function scanMusicBrainz(index, hrefs) {
+    scanMusicBrainzReleases(index, hrefs);
+    musicBrainzLinks(index, hrefs);
+  }
+
+  const musicBrainzLinks = linkScanner('a[href*="/release-group/"], a[href*="/release/"]', "music",
+    (url) => (location.pathname.startsWith("/release-group/") && url.pathname.startsWith("/release/") ? null : url.pathname.match(/^\/release(?:-group)?\/([0-9a-f-]{36})\/?$/)?.[1]),
     (index, link, mbid, label) => {
       if (location.pathname.includes(mbid) || document.querySelector(`.releaseheader a[href*="${mbid}"]`)) return { skip: true };
-      const artist = document.querySelector(".artistheader h1 a, .rgheader .subheader a[href*='/artist/']")?.textContent.trim();
-      const item = { artists: artist ? [artist] : [], title: label };
+      // Search, label and similar tables name the artist in each row; artist pages only in the header.
+      const rowArtists = [...(link.closest("tr")?.querySelectorAll('a[href*="/artist/"]') || [])].map((a) => a.textContent.trim());
+      const header = document.querySelector(".artistheader h1 a, .rgheader .subheader a[href*='/artist/']")?.textContent.trim();
+      const artists = [...new Set([...rowArtists, header].filter(Boolean))];
+      const item = { artists, title: label };
+      const named = artists.length ? `${artists[0]} – ${label}` : label;
       const byId = lookupGroup(index, [`mb:${mbid}`]);
-      if (byId) return { group: byId, how: "MusicBrainz ID", item };
-      return { group: artist ? lookupAlbum(index, [artist], [label]) : null, how: "artist and title", item };
+      if (byId) return { group: byId, how: "MusicBrainz ID", label: named, item };
+      return { group: artists.length ? lookupAlbum(index, artists, [label]) : null, how: "artist and title", label: named, item };
     }, ".releaseheader, .rgheader");
 
   // Album of the Year blocks show the artist above the title, artist pages only in the header, and chart rows
@@ -1885,7 +2068,8 @@
     }
   }
 
-  // Pages that swap their results without reloading start a new count when the address changes.
+  // Pages that swap their results without reloading start a new count when the address changes. Items that stay on
+  // the page, such as YouTube's home page when you come back to it, are scanned again so they're counted again.
   let tallyPage = "";
 
   function trackTallyPage() {
@@ -1893,6 +2077,8 @@
     if (page === tallyPage) return;
     tallyPage = page;
     resetTally();
+    scanned = new WeakMap();
+    marked = new WeakSet();
   }
 
   // YouTube reuses thumbnail elements for other videos as you browse, so each thumbnail remembers which video it was marked for.
@@ -1904,7 +2090,7 @@
       const href = link.getAttribute("href");
       const video = href.match(/[?&]v=([\w-]{11})/)?.[1] || href.match(/^\/shorts\/([\w-]{11})/)?.[1];
       const preview = link.closest("ytd-video-preview");
-      if (!video || !(preview || link.querySelector("img"))) continue;
+      if (!video || !(preview || link.querySelector("img")) || link.closest("ytd-browse[hidden], ytd-search[hidden], ytd-watch-flexy[hidden]")) continue;
       const renderer = link.closest("ytd-rich-item-renderer, ytd-video-renderer, ytd-compact-video-renderer, ytd-grid-video-renderer, ytd-playlist-video-renderer") || link.closest("yt-lockup-view-model");
       const poster = link.closest("ytd-thumbnail") || link.querySelector("ytd-thumbnail, yt-thumbnail-view-model") || link;
       const target = renderer || poster;
@@ -1942,10 +2128,15 @@
     const hrefs = makeHrefs(s, machine);
     tally.hrefs = hrefs;
     tally.settings = s;
+    // A site's markup changing shouldn't take the page's badges or later rescans down with it.
     const rescan = (index) => {
       if (!scan) return;
-      scan(index, hrefs);
-      renderTally();
+      try {
+        scan(index, hrefs);
+        renderTally();
+      } catch (error) {
+        console.warn(`[Library Badges] Scanning this page failed: ${error.message}`);
+      }
     };
 
     if (scan && !document.getElementById("library-badges-marks")) {
@@ -1968,25 +2159,39 @@
       reloadArr();
       if (!markerObserver) document.addEventListener("visibilitychange", () => document.hidden || reloadArr());
     }
+    const emptyIndex = (errors = {}) => ({ entries: {}, groups: [], titlesByArtist: {}, markers: {}, errors });
+    const failedIndex = (error) => {
+      console.warn(`[Library Badges] Loading the index failed: ${error.message}`);
+      return emptyIndex(Object.fromEntries(INDEX_SOURCES[kind].map(([code]) => [code, error.message])));
+    };
+    const showPage = (shown) => {
+      try {
+        onIndex?.(shown, hrefs);
+      } catch (error) {
+        console.warn(`[Library Badges] Showing this page's badges failed: ${error.message}`);
+      }
+    };
     const index = hasSources ? await loadIndex(s, kind, (rebuilt) => {
       markerIndex = rebuilt;
       refresh(rebuilt);
-      onIndex?.(rebuilt, hrefs);
-    }) : { entries: {}, groups: [], titlesByArtist: {}, markers: {}, errors: {} };
+      showPage(rebuilt);
+    }).catch(failedIndex) : emptyIndex();
     if (scan) markerIndex = index;
     rescan(index);
-    onIndex?.(index, hrefs);
+    showPage(index);
     if (!scan || markerObserver) return;
 
     let timer = null;
-    markerObserver = new MutationObserver(() => {
+    const schedule = () => {
       if (timer || document.hidden) return;
       timer = setTimeout(() => {
         timer = null;
         rescan(markerIndex);
       }, 50);
-    });
+    };
+    markerObserver = new MutationObserver(schedule);
     markerObserver.observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("visibilitychange", schedule);
   }
 
   // ---------------------------------------------------------------------------
@@ -2388,7 +2593,7 @@
     let url = location.href;
     let done = runSite(s, site);
     let timer = null;
-    new MutationObserver(() => {
+    const schedule = () => {
       if (timer || document.hidden) return;
       timer = setTimeout(() => {
         timer = null;
@@ -2401,7 +2606,9 @@
         }
         if (!done) done = runSite(s, site);
       }, 300);
-    }).observe(document.body, { childList: true, subtree: true });
+    };
+    new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
+    document.addEventListener("visibilitychange", schedule);
   }
 
   // Copies every setting (including passwords and tokens) to the clipboard, or reads them back, to set up another browser.
@@ -2419,7 +2626,9 @@
     const text = prompt("Paste exported Library Badges settings:");
     if (!text) return;
     try {
-      const values = normalizeSettings(JSON.parse(text));
+      const raw = JSON.parse(text);
+      if (!raw || typeof raw !== "object" || !SETTING_KEYS.some((key) => key in raw)) throw new Error("Not settings");
+      const values = normalizeSettings(raw);
       for (const key of SETTING_KEYS) GM_setValue(key, values[key]);
       location.reload();
     } catch {

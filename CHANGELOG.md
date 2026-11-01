@@ -5,6 +5,28 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-11-01
+
+### Changed
+- **RateYourMusic:** The Issues list on album pages marks only digital and streaming issues, with each library's icon on the issue closest to its copy: the same title, then the same edition wording, then the primary issue. Physical issues stay unmarked.
+- **MusicBrainz:** Release group pages mark only the release you have: the one a library's copy is tagged with, otherwise the closest digital release. Other releases stay unmarked.
+
+### Fixed
+- **Cover Marks:** RateYourMusic charts put their icons and ↓ on the album art instead of after the title. Marks after a title line up with the title's text on every site, even when the title is larger than the text around it.
+- **Album Matching:** Numbered albums no longer stand in for each other ("Led Zeppelin" and "Led Zeppelin IV", "Volume 2" and "Volume 3", "Kraftwerk 2" and "Kraftwerk"). Titles made only of symbols stay distinct ("×" and "÷"). A title shared across services only groups albums that share an artist or are credited to "Various Artists", so Queen's and Bob Dylan's "Greatest Hits" stay apart. "(Live)" in a title now counts, so a live album no longer matches the studio album, and edition wording only matches whole words, so "(Alive)" stays in a title.
+- **Film Index:** Files tagged with an 11-character name such as `[tmdbid-1234]` or `[720p-Bluray]` are no longer mistaken for YouTube videos and dropped from the film index.
+- **Letterboxd:** A missing film whose title matches another film a year away now gets its ↓. Posters offer both Radarr and Sonarr, since they don't say whether an item is a film or a show.
+- **Library Index:** A service that can't be reached no longer wipes its cached items: the last good index stays and is retried every 15 minutes. Changing a password, token, API key or the Jellyfin user rebuilds the index right away. Tabs share background index rebuilds instead of each scanning every library.
+- **Reliability:** A failed page scan or a failed index load no longer leaves badges stuck on "…" or stops later rescans. An artist or film named "Constructor" no longer breaks the index or lookups.
+- **MusicBrainz:** Search, label and similar tables match by each row's artist, not only by MusicBrainz ID.
+- **YouTube:** Going back to a page such as the home page counts its videos again, and pages YouTube keeps hidden aren't scanned.
+- **Counter:** The open list only redraws when its items change, so it keeps its scroll position and clicks register. Items Radarr or Sonarr has but doesn't monitor count as missing, not on the way.
+- **Background Tabs:** Pages rescan when you switch to them, so anything that loaded while the tab was hidden gets marked.
+- **Film Details:** A film with several versions shows the details of the best one, and "upgrade from 720p" no longer appears when you also have a better copy of it in that library.
+- **Index Checks:** Plex's quick check only looks at the libraries the index covers, so a new film no longer rebuilds the music index and a music play no longer rebuilds the film index.
+- **Tidarr:** The ↓ on RateYourMusic chart rows opens the album directly when the row links it on Tidal.
+- **Import Settings:** Pasting JSON that isn't Library Badges settings shows the error instead of blanking every setting.
+
 ## [0.1.1] - 2026-10-31
 
 ### Fixed
