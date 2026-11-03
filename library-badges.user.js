@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.2
+// @version      0.1.3
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -28,10 +28,10 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.2";
+  const VERSION = "0.1.3";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
-  const INDEX_VERSION = 16;
+  const INDEX_VERSION = 17;
   const FRESHNESS_CHECK = 15 * 60 * 1000;
 
   // YouTube only accepts HTML strings through a Trusted Types policy.
@@ -447,7 +447,7 @@
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .replace(/['"’“”`]/g, "")
-      .replace(/\s*[([{][^)\]}]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|special|bonus|clean|explicit|editions?|re-?issue|mono|stereo|versions?|cuts?|box set|collectors?|b[\s-]?sides?|feat|ft|with)\b[^)\]}]*[)\]}]/gi, "")
+      .replace(/\s*[([{][^)\]}]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|special|bonus|clean|explicit|editions?|re-?issue|mono|stereo|versions?|cuts?|box set|collectors?|b[\s-]?sides?|ep|feat|ft|with)\b[^)\]}]*[)\]}]/gi, "")
       .replace(/\s*[([{]\s*(?:the\s+)?(?:original\s+|official\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+|television\s+|tv\s+|series\s+)?(?:soundtrack|score|ost)\s*[)\]}]/gi, "")
       .replace(/\s*[([{]\s*(?:original\s+)?music\s+(?:from|for)\s+(?:and\s+inspired\s+by\s+)?(?:the\s+)?(?:original\s+)?(?:motion\s+picture|film|series|game)\b[^)\]}]*[)\]}]/gi, "")
       .replace(/(\S)\s+(?:original\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+)?soundtrack\s*$/i, "$1")
@@ -457,6 +457,7 @@
       .replace(/\s*\+\s*/g, " and ")
       .replace(/[^\p{L}\p{N}\s]/gu, "")
       .replace(/\s+(?:\d+(?:st|nd|rd|th)\s+anniversary|(?:super\s+)?deluxe|expanded|(?:\d{4}\s+)?remastered)(?:\s+(?:edition|version))?\s*$/, "")
+      .replace(/\s+ep\s*$/, "")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -1133,11 +1134,11 @@
     .lbm-get a { align-items: center; gap: 3px; color: inherit !important; line-height: 13px !important; }
     .lbm-more { all: unset; cursor: pointer; color: #9ca3af; font: 700 10px/13px system-ui, sans-serif; padding: 0 1px; }
     .lbm-more:hover { color: #fff; }
-    .lbm-menu { position: absolute; top: calc(100% + 4px); left: 0; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 4px;
+    .lbm-menu { position: fixed; z-index: 2147483647; display: flex; flex-direction: column; gap: 2px; padding: 4px;
       border-radius: 6px; background: #151821; border: 1px solid #374151; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); }
-    .lbm-menu[hidden] { display: none !important; }
-    .lbm-menu a { gap: 6px !important; padding: 4px 6px; border-radius: 4px; color: #e5e7eb !important; font: 600 12px/14px system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; }
+    .lbm-menu a { display: inline-flex; align-items: center; text-decoration: none !important; gap: 6px !important; padding: 4px 6px; border-radius: 4px; color: #e5e7eb !important; font: 600 12px/14px system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; }
     .lbm-menu a:hover { background: #1f2430; }
+    .lbm-menu svg { width: 13px !important; height: 13px !important; display: block; }
     .release_navigation_links:has(> .prev_link > .lbm, > .next_link > .lbm) { overflow: visible; }
     .release_navigation_links .prev_link:has(> .lbm), .release_navigation_links .next_link:has(> .lbm) {
       display: flex; align-items: center; min-width: 0; overflow: visible;
@@ -1807,7 +1808,6 @@
       more.title = "Other downloaders";
       const menu = document.createElement("span");
       menu.className = "lbm-menu";
-      menu.hidden = true;
       for (const link of links.slice(1)) {
         const a = anchor(link);
         a.append(SERVER_NAMES[link.code]);
@@ -1815,11 +1815,35 @@
       }
       more.addEventListener("click", (event) => {
         event.preventDefault();
-        menu.hidden = !menu.hidden;
+        if (openMenu === menu) return closeMenu();
+        openGetMenu(menu, more);
       });
-      marker.append(more, menu);
+      marker.append(more);
     }
     return marker;
+  }
+
+  // List rows and cards often clip their overflow, so the open menu sits on the page body, fixed under its ▾.
+  let openMenu = null;
+  function openGetMenu(menu, button) {
+    closeMenu();
+    const box = button.getBoundingClientRect();
+    menu.style.top = `${box.bottom + 4}px`;
+    menu.style.left = `${box.left}px`;
+    document.body.append(menu);
+    menu.style.left = `${Math.max(4, Math.min(box.left, innerWidth - menu.offsetWidth - 4))}px`;
+    openMenu = menu;
+    document.addEventListener("click", closeMenu);
+    addEventListener("scroll", closeMenu, true);
+    addEventListener("resize", closeMenu);
+  }
+
+  function closeMenu() {
+    openMenu?.remove();
+    openMenu = null;
+    document.removeEventListener("click", closeMenu);
+    removeEventListener("scroll", closeMenu, true);
+    removeEventListener("resize", closeMenu);
   }
 
   // Discogs names artists with a number for disambiguation ("Tinashe (2)") and an asterisk for name variations.
