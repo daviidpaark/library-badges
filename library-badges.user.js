@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.3
+// @version      0.1.4
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -28,7 +28,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.3";
+  const VERSION = "0.1.4";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
   const INDEX_VERSION = 17;
@@ -2311,7 +2311,14 @@
 
     const addBadge = createBadgeRow(album.anchor, album.position);
     const setters = libraries.map((code) => [code, addBadge(code)]);
-    let downloadSetters = null;
+    for (const code of downloads) {
+      const exact = (code === "d" && album.deezerIds[0]) || (code === "t" && album.tidalIds[0]);
+      addBadge(code)("action", {
+        href: SERVERS[code].link(s, album),
+        note: exact ? "album" : "search",
+        title: code === "k" ? "Open slskd's search page" : `Open ${exact ? "the album" : `a search for "${albumQuery(album)}"`} in ${SERVER_NAMES[code]} to ${code === "c" ? "buy" : "download"} it`,
+      });
+    }
     startMarkers(s, "music", scan, (index, hrefs) => {
       const byMbid = lookupGroup(index, album.mbids.map((id) => `mb:${id}`));
       const bySpotify = byMbid ? null : lookupGroup(index, album.spotifyIds.map((id) => `spotify:${id}`));
@@ -2329,23 +2336,6 @@
           set("missing", { href, title: `Not found in ${name}. Click to ${code === "s" && album.spotifyIds[0] ? "open the album on Spotify" : `search ${name} for "${query}"`}.` });
         }
       }
-
-      // Download links only matter while the album is missing from the library downloads land in.
-      if (group?.n) {
-        for (const [, set] of downloadSetters || []) set.pill.remove();
-        downloadSetters = null;
-      } else if (!downloadSetters) {
-        downloadSetters = downloads.map((code) => [code, addBadge(code)]);
-        for (const [code, set] of downloadSetters) {
-          const server = SERVERS[code];
-          const exact = (code === "d" && album.deezerIds[0]) || (code === "t" && album.tidalIds[0]);
-          set("action", {
-            href: server.link(s, album),
-            note: exact ? "album" : "search",
-            title: code === "k" ? "Open slskd's search page" : `Open ${exact ? "the album" : `a search for "${albumQuery(album)}"`} in ${SERVER_NAMES[code]} to ${code === "c" ? "buy" : "download"} it`,
-          });
-        }
-      }
     });
   }
 
@@ -2360,15 +2350,16 @@
   function runFilmPage(s, film, scan) {
     const tv = film.type === "tv";
     const libraries = configuredCodes(s, INDEX_SOURCES.films);
-    const actions = tv ? [] : configuredCodes(s, [["r", radarr]]);
+    const showRadarrPill = !tv && radarr.configured(s);
     const showSonarrPill = tv && sonarr.configured(s);
-    if (!libraries.length && !actions.length && !showSonarrPill) return showSetup(film.anchor);
+    if (!libraries.length && !showRadarrPill && !showSonarrPill) return showSetup(film.anchor);
 
     const addBadge = createBadgeRow(film.anchor);
     const setters = libraries.map((code) => [code, addBadge(code)]);
+    const radarrSet = showRadarrPill ? addBadge("r") : null;
+    if (radarrSet) showRadarr(s, film, radarrSet);
     if (showSonarrPill) showSonarr(s, film, addBadge("o"));
-    let actionSetters = null;
-    let upgradeSet = null;
+    let upgradeFrom = "";
     startMarkers(s, "films", scan, (index, hrefs) => {
       const { group, how } = findFilm(index, film);
       for (const [code, set] of setters) {
@@ -2377,23 +2368,14 @@
           set("error", { title: `${name}: ${index.errors[code]}` });
         } else if (group?.[code]) {
           showOwned(s, code, set, hrefs[code], group[code], how, film).then((details) => {
-            // A film you only have in SD or 720p links to Radarr, where you can search for a better copy.
-            if (tv || upgradeSet || !radarr.configured(s) || !["720p", "SD"].includes(details?.resolution)) return;
-            upgradeSet = addBadge("r");
-            showRadarr(s, film, upgradeSet, details.resolution);
+            // A film you only have in SD or 720p notes the upgrade on its Radarr pill.
+            if (!radarrSet || upgradeFrom || !["720p", "SD"].includes(details?.resolution)) return;
+            upgradeFrom = details.resolution;
+            showRadarr(s, film, radarrSet, upgradeFrom);
           }, () => {});
         } else {
           set("missing", { href: SEARCH[code](s, film.title), title: `Not found in ${name}. Click to search ${name} for "${film.title}".` });
         }
-      }
-
-      // Radarr only shows while the film isn't in any library.
-      if (libraries.some((code) => group?.[code])) {
-        for (const [, set] of actionSetters || []) set.pill.remove();
-        actionSetters = null;
-      } else if (!actionSetters) {
-        actionSetters = actions.map((code) => [code, addBadge(code)]);
-        for (const [, set] of actionSetters) showRadarr(s, film, set);
       }
     });
   }
@@ -2468,13 +2450,15 @@
     const upgrade = upgradeFrom ? `upgrade from ${upgradeFrom}` : "";
     if (!film.tmdb) return set("action", { href: radarrAddLink(s, film), note: upgrade, title: "Open Radarr's add page" });
     set("action", { href: radarr.link(s, film, null), note: upgrade, title: "Open Radarr's add page" });
+    const run = (set.run = {});
     radarr.movie(s, film).then(({ movie, state }) => {
+      if (set.run !== run) return;
       const note = [upgrade, state].filter(Boolean).join(" · ");
       if (note) set("action", { href: radarr.link(s, film, movie), note, title: `Radarr: ${note}. Open it to search or add the movie.` });
     }, (error) => set("error", { href: radarr.link(s, film, null), title: `Radarr: ${error.message}` }));
   }
 
-  // Shows always link to Sonarr, since it knows which episodes are missing even when the show is in a library.
+  // Films and shows always link to Radarr or Sonarr, even when a library has them, to manage, search or upgrade them.
   function showSonarr(s, show, set) {
     set("action", { href: sonarr.link(s, show, null), title: "Open Sonarr's add page" });
     sonarr.series(s, show).then(({ series, state }) => {
