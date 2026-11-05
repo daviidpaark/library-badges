@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.4
+// @version      0.1.5
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -28,7 +28,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.4";
+  const VERSION = "0.1.5";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
   const INDEX_VERSION = 17;
@@ -1897,7 +1897,8 @@
     }
     for (const item of document.querySelectorAll(".collection-item-container")) {
       const title = item.querySelector(".collection-item-title")?.firstChild?.textContent.trim();
-      items.push({ item, link: item.querySelector('a[href*="/album/"]'), title, artist: byline(item.querySelector(".collection-item-artist")) });
+      const poster = item.querySelector(".collection-item-art-container, .tralbum-art-container") || item.querySelector("img")?.closest("div");
+      items.push({ item, link: item.querySelector('a[href*="/album/"]'), title, artist: byline(item.querySelector(".collection-item-artist")), poster });
     }
     for (const item of document.querySelectorAll("li.searchresult")) {
       if (item.querySelector(".itemtype")?.textContent.trim().toUpperCase() !== "ALBUM") continue;
