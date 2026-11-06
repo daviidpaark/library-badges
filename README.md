@@ -12,7 +12,7 @@ Libraries: Navidrome, Plex, Jellyfin, Spotify (through [spicetify-library](https
 
 1. Install [Violentmonkey](https://violentmonkey.github.io/) or [Tampermonkey](https://www.tampermonkey.net/).
 2. Open [`library-badges.user.js`](https://raw.githubusercontent.com/daviidpaark/library-badges/main/library-badges.user.js) and confirm the install.
-3. Open any supported page and click **⚙ Set up Library Badges** under the title, or choose **Library Badges → Settings** in the userscript manager's menu.
+3. Open any supported page and click **⚙ Set up Library Badges** under the title, or choose **Settings** in the **Library Badges menu** (the userscript manager's menu; in Spotify's desktop app, the profile menu).
 4. Fill in the services you use and press **Test** next to each one. **Save** reloads the page.
 5. The first request to each server asks you to allow the domain. Choose **Always allow domain**.
 
@@ -26,21 +26,21 @@ The same file also works as a [Spicetify](https://spicetify.app/) extension, wit
 
 Servers need **https** addresses inside Spotify; a plain `http://` one (such as Plex on `http://server:32400`) shows an error badge. To update, copy the new file over the old one and run `spicetify apply` again.
 
+### Your Deemix, Tidarr and Spicetify Library
+
+Their addresses are your own, so the script can't list them. Add them once: in Violentmonkey, open the script, go to its **Settings** tab and add them to the custom **@match** rules (Tampermonkey: **Settings → User matches**), one line per server, for example `http://192.168.1.100:6595/*` and `http://192.168.1.100:8484/*`, plus Spicetify Library's read-only address. They must match the Deemix, Tidarr and Spicetify Library URLs in Library Badges' settings, and they're kept when the script updates.
+
 ## Supported sites
 
 | Media | Sites | Matched by |
 | --- | --- | --- |
-| Albums | RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify's web player, [The Fork](https://the-fork.vercel.app/), [The Drop](https://the-drop-reviews.vercel.app/) | Spotify album ID (RateYourMusic, Spotify), MusicBrainz ID (MusicBrainz), otherwise artist and title |
+| Albums | RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify (web player and [desktop app](#spotify-desktop-app)), [The Fork](https://the-fork.vercel.app/), [The Drop](https://the-drop-reviews.vercel.app/), and your own Deemix, Tidarr and Spicetify Library | Spotify album ID (RateYourMusic, Spotify, Spicetify Library), MusicBrainz ID (MusicBrainz), otherwise artist and title |
 | Films and shows | Letterboxd | TMDB ID on film pages; title and year on lists, with a match one year off confirmed against the film's TMDB ID |
 | YouTube videos | YouTube | Video ID (see [YouTube libraries](#youtube-libraries)) |
 
 Every site gets badges on its item pages and icons on its list pages. Each album is marked once: Discogs' expanded versions and version tables are left alone, and RateYourMusic's Issues lists and MusicBrainz release groups only mark the digital version closest to each library's copy (the same title, then the same edition wording, then the first listed, which on RateYourMusic is the primary issue). On MusicBrainz, a copy tagged with a release ID marks that exact release, whatever its format. The Fork and The Drop have no album pages, so their review dialog gets the badges.
 
-### Deemix, Tidarr and Spicetify Library
-
-Your own Deemix and Tidarr get badges too, so you can see what you already have before downloading it: album pages get the library badges, and search results, artist pages and Deemix's charts and favorites mark each album. Download links there leave out the downloader you're on. [Spicetify Library](https://github.com/daviidpaark/spicetify-library) marks the albums in its library, Discover and Release List tabs, matched by Spotify album ID.
-
-Their addresses are your own, so the script can't list them. Add them once: in Violentmonkey, open the script, go to its **Settings** tab and add them to the custom **@match** rules (Tampermonkey: **Settings → User matches**), one line per server, for example `http://192.168.1.100:6595/*` and `http://192.168.1.100:8484/*`. Add Spicetify Library's read-only address the same way. They must match the Deemix, Tidarr and Spicetify Library URLs in Library Badges' settings, and they're kept when the script updates.
+Your own Deemix and Tidarr get badges too, so you can see what you already have before downloading it: album pages get the library badges, and search results, artist pages and Deemix's charts and favorites mark each album. Download links there leave out the downloader you're on. [Spicetify Library](https://github.com/daviidpaark/spicetify-library) marks the albums in its library, Discover and Release List tabs. These need their addresses added once (see [Your Deemix, Tidarr and Spicetify Library](#your-deemix-tidarr-and-spicetify-library)).
 
 ## Item pages
 
@@ -67,17 +67,18 @@ Download and request links show whether or not you have the item, so every servi
 
 ## List pages
 
-Every item on a list page gets one of three marks, in the corner of its cover or poster, or after its title when the cover is too small:
+Every item on a list page gets one of these marks, in the corner of its cover or poster, or after its title when the cover is too small:
 
 | Mark | Meaning |
 | --- | --- |
 | Library icons | You have it. Click an icon to open it there. Films, shows and videos you've watched add a green **✓**; a show Sonarr says is missing episodes adds how many you have, such as "50/62". |
 | Radarr or Sonarr icon, dashed | Not in your library yet, but Radarr or Sonarr has it, so it's on its way. Dimmed when it isn't monitored. Needs the service's API key. |
+| Navidrome icon and **?**, amber, dashed | Not sure: Navidrome probably has it under another credit or title (see [Not sure](#not-sure)). Click to open that album and check. It sits in front of the ↓ when there is one. |
 | **↓**, dashed | Missing. Opens it in your default downloader; **▾** next to it lists the others. Albums use Deemix, Tidarr, slskd or Bandcamp, films Radarr, shows Sonarr. Letterboxd posters offer both Radarr and Sonarr, since they don't say which an item is. |
 
-Albums you have elsewhere but not in Navidrome, where downloads land, get both their library icons and the ↓. An album Navidrome probably has under another credit or title gets an amber **?** with the Navidrome icon (in front of the ↓); click it to open that album and check. The counter lists these under **Not sure**.
+Albums you have elsewhere but not in Navidrome, where downloads land, get both their library icons and the ↓.
 
-The **counter** in the bottom-right corner shows how many items on the page you have and how many are on the way (items Radarr or Sonarr has but doesn't monitor count as missing). An album counts as yours once it's in Navidrome, where downloads land; one you only have elsewhere counts as missing, with its library icons in the list. Films, shows and videos count when any library has them. On a Letterboxd director's, actor's or list page, that's how complete it is in your library. Click it to list the page's items, grouped as in your library, on the way and missing:
+The **counter** in the bottom-right corner shows how many items on the page you have and how many are on the way (items Radarr or Sonarr has but doesn't monitor count as missing). An album counts as yours once it's in Navidrome, where downloads land; one you only have elsewhere counts as missing, with its library icons in the list. Films, shows and videos count when any library has them. On a Letterboxd director's, actor's or list page, that's how complete it is in your library. Click it to list the page's items, grouped as in your library, on the way, not sure and missing:
 
 - **Search** narrows the list to names containing what you type.
 - The **library menu** shows only items in, or not in, one library (for example "Not in Navidrome" for what to download), or on film pages what you have or haven't watched.
@@ -95,23 +96,23 @@ The **counter** in the bottom-right corner shows how many items on the page you 
 | Jellyfin | Server URL, API key, optional username | Create a key in **Dashboard → API Keys**. Watched state is read for that user, or the first administrator. |
 | Spotify | Spicetify Library URL | The read-only address of [spicetify-library](https://github.com/daviidpaark/spicetify-library). |
 | Radarr, Sonarr | URL, optional API key | The key adds each film's or show's state, and the "on its way" icons on list pages. |
-| Deemix, Tidarr, slskd | URL | Linked to. Deemix and Tidarr also get badges once you add their addresses to the script's matches (see [Deemix, Tidarr and Spicetify Library](#deemix-tidarr-and-spicetify-library)). |
-| Bandcamp | On or off | Adds a Bandcamp search to albums missing from Navidrome. |
+| Deemix, Tidarr, slskd | URL | Linked to. Deemix and Tidarr also get badges once you add their addresses to the script's matches (see [Your Deemix, Tidarr and Spicetify Library](#your-deemix-tidarr-and-spicetify-library)). |
+| Bandcamp | On or off | Adds a Bandcamp search link: on album pages always, on list pages to albums missing from Navidrome. |
 | Letterboxd | Username | Notes watched films you haven't logged. |
 | Display | Film details, icons on lists, ↓ on missing items, default album downloader, page counter, covers you have | Hide what you don't need, choose which downloader the ↓ opens first, and optionally dim the covers of items you have so new things stand out (hover to see them). |
 
-Leave a service empty to turn it off. Settings, including passwords and tokens, stay in the userscript manager's storage and are only sent to the server they belong to. Use addresses your browser can reach wherever you use it.
+Leave a service empty to turn it off. Settings, including passwords and tokens, stay in the userscript manager's storage (in Spotify's desktop app, the app's own storage) and are only sent to the server they belong to. Use addresses your browser can reach wherever you use it.
 
 You can use download or request links without configuring a library; ownership badges require a configured library.
 
 - **Library gaps**, at the bottom of the settings, lists what each library is missing compared with the others, for example albums in Navidrome that aren't saved in Spotify.
-- **Export settings** and **Import settings** in the userscript menu copy every setting (including passwords and tokens) to another browser through the clipboard.
+- **Export settings** and **Import settings** in the Library Badges menu copy every setting (including passwords and tokens) to another browser through the clipboard.
 
 ## How matching works
 
 ### The library index
 
-Pages match against an index of each whole library, built the first time you open a supported page (a few seconds) and cached for six hours. Every 15 minutes a quick check looks at the newest addition, and for films and videos the newest watch, and rebuilds the index in the background when something changed. If a service can't be reached, the last good index stays and the rebuild is retried every 15 minutes. **Refresh library index** in the userscript menu rebuilds it right away.
+Pages match against an index of each whole library, built the first time you open a supported page (a few seconds) and cached for six hours. Every 15 minutes a quick check looks at the newest addition, and for films and videos the newest watch, and rebuilds the index in the background when something changed. If a service can't be reached, the last good index stays and the rebuild is retried every 15 minutes. **Refresh library index** in the Library Badges menu rebuilds it right away.
 
 Radarr's and Sonarr's lists, used for the "on its way" icons, are cached for 30 minutes. Clicking a film's or show's ↓ expires that cache, so after adding it and coming back to the tab the icon updates.
 
