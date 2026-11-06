@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.5
-// @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
+// @version      0.1.6
+// @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
 // @match        https://letterboxd.com/*
@@ -14,6 +14,7 @@
 // @match        https://the-fork.vercel.app/*
 // @match        https://the-drop-reviews.vercel.app/*
 // @match        https://www.youtube.com/*
+// @match        https://open.spotify.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -28,11 +29,96 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.5";
+  const VERSION = "0.1.6";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
-  const INDEX_VERSION = 17;
+  const INDEX_VERSION = 18;
   const FRESHNESS_CHECK = 15 * 60 * 1000;
+
+  // The same file runs as a Spicetify extension inside Spotify's desktop app, where there's no userscript manager:
+  // requests go through fetch (so each server has to allow Spotify's origin), saved values live in IndexedDB (the
+  // library index is too big for localStorage) and the commands in a Library Badges submenu of the profile menu.
+  const IN_SPOTIFY = typeof GM_xmlhttpRequest !== "function" && typeof Spicetify !== "undefined";
+  const gm = IN_SPOTIFY ? spicetifyApi() : { request: GM_xmlhttpRequest, get: GM_getValue, set: GM_setValue, menu: GM_registerMenuCommand, ready: () => Promise.resolve() };
+
+  // Spotify's app keeps its address at /index.html and tracks pages in its own history.
+  function currentPath() {
+    return (IN_SPOTIFY && Spicetify.Platform?.History?.location?.pathname) || location.pathname;
+  }
+
+  function currentHref() {
+    return IN_SPOTIFY ? `${currentPath()}${Spicetify.Platform?.History?.location?.search || ""}` : location.href;
+  }
+
+  function spicetifyApi() {
+    const values = new Map();
+    const commands = [];
+    let db = null;
+    let menuTimer = null;
+    const openDb = () =>
+      new Promise((resolve, reject) => {
+        const open = indexedDB.open("library-badges", 1);
+        open.onupgradeneeded = () => open.result.createObjectStore("values");
+        open.onsuccess = () => resolve(open.result);
+        open.onerror = () => reject(open.error);
+      });
+    const loadValues = () =>
+      new Promise((resolve) => {
+        const cursor = db.transaction("values").objectStore("values").openCursor();
+        cursor.onsuccess = () => {
+          if (!cursor.result) return resolve();
+          values.set(cursor.result.key, cursor.result.value);
+          cursor.result.continue();
+        };
+        cursor.onerror = () => resolve();
+      });
+    const registerMenu = () => {
+      const items = commands.map(([name, run]) => new Spicetify.Menu.Item(name, false, run));
+      new Spicetify.Menu.SubMenu("Library Badges", items).register();
+    };
+    return {
+      // A server that doesn't allow Spotify's origin is asked again through Spotify's own request bridge, which reports
+      // a failed request as { code, error, message } instead of throwing. Plain http addresses can't be reached either way.
+      request({ url, headers = {}, timeout = 20000, onload, onerror, ontimeout }) {
+        fetch(url, { headers, signal: AbortSignal.timeout(timeout) })
+          .then(async (res) => onload({ status: res.status, responseText: await res.text() }))
+          .catch((error) => {
+            if (error.name === "TimeoutError") return ontimeout();
+            if (url.startsWith("http:")) return onerror(`Spotify's app only reaches https addresses, not ${new URL(url).host}`);
+            Spicetify.CosmosAsync.get(url, null, headers).then((body) => {
+              const failed = body && typeof body === "object" && typeof body.code === "number" && "error" in body && "message" in body;
+              if (!failed) return onload({ status: 200, responseText: typeof body === "string" ? body : JSON.stringify(body) });
+              if (body.code === 404) return onload({ status: 404, responseText: "" });
+              onerror();
+            }, () => onerror());
+          });
+      },
+      get: (key, fallback) => (values.has(key) ? values.get(key) : fallback),
+      set(key, value) {
+        values.set(key, value);
+        return new Promise((resolve) => {
+          try {
+            const tx = db.transaction("values", "readwrite");
+            tx.objectStore("values").put(value, key);
+            tx.oncomplete = tx.onerror = tx.onabort = () => resolve();
+          } catch (error) {
+            console.warn(`[Library Badges] Saving ${key} failed: ${error.message}`);
+            resolve();
+          }
+        });
+      },
+      menu(name, run) {
+        commands.push([name, run]);
+        clearTimeout(menuTimer);
+        menuTimer = setTimeout(registerMenu, 0);
+      },
+      async ready() {
+        while (!Spicetify.Menu || !document.body) await new Promise((resolve) => setTimeout(resolve, 100));
+        db = await openDb().catch(() => null);
+        if (db) await loadValues();
+      },
+    };
+  }
 
   // YouTube only accepts HTML strings through a Trusted Types policy.
   const htmlPolicy = (() => {
@@ -183,7 +269,7 @@
   }
 
   function getSettings() {
-    return normalizeSettings(Object.fromEntries(SETTING_KEYS.map((key) => [key, GM_getValue(key, "")])));
+    return normalizeSettings(Object.fromEntries(SETTING_KEYS.map((key) => [key, gm.get(key, "")])));
   }
 
   const SETTINGS_STYLE = `
@@ -329,8 +415,7 @@
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const values = normalizeSettings(Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value])));
-      for (const key of SETTING_KEYS) GM_setValue(key, values[key]);
-      location.reload();
+      Promise.all(SETTING_KEYS.map((key) => gm.set(key, values[key]))).then(() => location.reload());
     });
 
     shadow.append(style, form);
@@ -348,7 +433,7 @@
     const s = getSettings();
     for (const [kind, noun, one, site] of [["music", "albums", "album", "RateYourMusic"], ["films", "films and shows", "film or show", "Letterboxd"], ["videos", "YouTube videos", "YouTube video", "YouTube"]]) {
       if (INDEX_SOURCES[kind].filter(([, server]) => server.configured(s)).length < 2) continue;
-      const index = GM_getValue(`index:${kind}`, null);
+      const index = gm.get(`index:${kind}`, null);
       if (!index?.groups) {
         const empty = document.createElement("p");
         empty.className = "gaps-intro";
@@ -395,7 +480,7 @@
   function requestText(url, headers = {}) {
     const host = new URL(url).host;
     return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
+      gm.request({
         method: "GET",
         url,
         headers,
@@ -405,7 +490,7 @@
           if (res.status < 200 || res.status >= 300) return reject(Object.assign(new Error(`${host} answered HTTP ${res.status}`), { status: res.status }));
           resolve(res.responseText);
         },
-        onerror: () => reject(new Error(`Could not reach ${host}`)),
+        onerror: (message) => reject(new Error(typeof message === "string" ? message : `Could not reach ${host}`)),
         ontimeout: () => reject(new Error(`${host} timed out`)),
       });
     });
@@ -425,12 +510,12 @@
   function reach(url) {
     const host = new URL(url).host;
     return new Promise((resolve, reject) => {
-      GM_xmlhttpRequest({
+      gm.request({
         method: "GET",
         url,
         timeout: 10000,
         onload: (res) => (res.status < 500 ? resolve(`Reachable (HTTP ${res.status})`) : reject(new Error(`${host} answered HTTP ${res.status}`))),
-        onerror: () => reject(new Error(`Could not reach ${host}`)),
+        onerror: (message) => reject(new Error(typeof message === "string" ? message : `Could not reach ${host}`)),
         ontimeout: () => reject(new Error(`${host} timed out`)),
       });
     });
@@ -447,15 +532,20 @@
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .replace(/['"’“”`]/g, "")
-      .replace(/\s*[([{][^)\]}]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|special|bonus|clean|explicit|editions?|re-?issue|mono|stereo|versions?|cuts?|box set|collectors?|b[\s-]?sides?|ep|feat|ft|with)\b[^)\]}]*[)\]}]/gi, "")
-      .replace(/\s*[([{]\s*(?:the\s+)?(?:original\s+|official\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+|television\s+|tv\s+|series\s+)?(?:soundtrack|score|ost)\s*[)\]}]/gi, "")
+      .replace(/([^\s([{])([([{])/g, "$1 $2")
+      .replace(/\s*[([{][^)\]}]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|special|bonus|clean|explicit|editions?|re-?issue|mono|stereo|versions?|cuts?|box set|collectors?|b[\s-]?sides?|ep|feat|ft|with|dj\s+mix)\b[^)\]}]*[)\]}]/gi, "")
+      .replace(/\s*[([{]\s*(?:the\s+)?(?:original\s+|official\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+|television\s+|tv\s+|series\s+)?(?:soundtrack|score|ost)(?:\s+album)?\s*[)\]}]/gi, "")
+      .replace(/\s*[([{]\s*(?:ost|original\s+soundtrack)\s+from\b[^)\]}]*[)\]}]/gi, "")
       .replace(/\s*[([{]\s*(?:original\s+)?music\s+(?:from|for)\s+(?:and\s+inspired\s+by\s+)?(?:the\s+)?(?:original\s+)?(?:motion\s+picture|film|series|game)\b[^)\]}]*[)\]}]/gi, "")
       .replace(/(\S)\s+(?:original\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+)?soundtrack\s*$/i, "$1")
+      .replace(/(\S)\s+original\s+(?:motion\s+picture\s+)?score\s*$/i, "$1")
       .replace(/\s*[-:–—]\s*[^-:–—]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|editions?|re-?issue|b[\s-]?sides?)\b[^-:–—]*$/gi, "")
       .replace(/\s*[([{]\d{4}[)\]}]/g, "")
-      .replace(/([-:–—]\s*)(?:recorded\s+)?live\s+(?:at|from|in)\s+(?:the\s+)?/gi, (wording, separator) => (keepLive ? wording : separator))
+      .replace(/(^|[-:–—]\s*)(?:recorded\s+)?live\s+(?:at|from|in)\s+(?:the\s+)?/gi, (wording, separator) => (keepLive ? wording : separator))
       .replace(/\s*\+\s*/g, " and ")
       .replace(/[^\p{L}\p{N}\s]/gu, "")
+      .replace(/\b(?:pt|part)\s+(\d+|[ivx]+)\b/g, "$1")
+      .replace(/(\S)\s+(?:original\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+)?soundtrack\s*$/, "$1")
       .replace(/\s+(?:\d+(?:st|nd|rd|th)\s+anniversary|(?:super\s+)?deluxe|expanded|(?:\d{4}\s+)?remastered)(?:\s+(?:edition|version))?\s*$/, "")
       .replace(/\s+ep\s*$/, "")
       .replace(/\s+/g, " ")
@@ -537,11 +627,11 @@
     },
     async machine(s) {
       const cacheKey = `plexMachine:${s.plexUrl}`;
-      let machine = GM_getValue(cacheKey, "");
+      let machine = gm.get(cacheKey, "");
       if (!machine) {
         const data = await this.get(s, "/identity");
         machine = data?.MediaContainer?.machineIdentifier || "";
-        if (machine) GM_setValue(cacheKey, machine);
+        if (machine) gm.set(cacheKey, machine);
       }
       return machine;
     },
@@ -636,7 +726,7 @@
     // Watched state is per user, and an API key isn't tied to one, so the chosen user (or the first administrator) is used.
     async userId(s) {
       const cacheKey = `jellyfinUser:${s.jellyfinUrl}:${s.jellyfinUser}`;
-      let id = GM_getValue(cacheKey, "");
+      let id = gm.get(cacheKey, "");
       if (!id) {
         const users = (await request(`${s.jellyfinUrl}/Users`, { Authorization: `MediaBrowser Token="${s.jellyfinApiKey}"` })) || [];
         const user = s.jellyfinUser
@@ -644,7 +734,7 @@
           : users.find((u) => u.Policy?.IsAdministrator) || users[0];
         if (s.jellyfinUser && !user) throw new Error(`No Jellyfin user named ${s.jellyfinUser}`);
         id = user?.Id || "";
-        if (id) GM_setValue(cacheKey, id);
+        if (id) gm.set(cacheKey, id);
       }
       return id;
     },
@@ -1052,23 +1142,23 @@
       }
     });
     const sig = indexSignature(s, kind);
-    GM_setValue(`indexChecked:${kind}`, Date.now());
+    gm.set(`indexChecked:${kind}`, Date.now());
     for (const [code, message] of Object.entries(errors)) console.warn(`[Library Badges] ${SERVER_NAMES[code]} index failed: ${message}`);
     // A service that had data and can't be reached right now doesn't wipe it: the last good index stays until a rebuild works.
-    const previous = GM_getValue(`index:${kind}`, null);
+    const previous = gm.get(`index:${kind}`, null);
     if (previous?.sig === sig && Object.keys(errors).some((code) => !previous.errors?.[code])) return { ...previous, errors };
     const index = { sig, builtAt: Date.now(), entries, groups, titlesByArtist, markers, errors };
-    GM_setValue(`index:${kind}`, index);
+    gm.set(`index:${kind}`, index);
     return index;
   }
 
   // Returns a cached index right away when there is one. At most every 15 minutes, across all tabs, it is rebuilt in the
   // background if it expired or a service failed last time, or if a quick check shows something new in a library.
   async function loadIndex(s, kind, onRebuilt) {
-    const stored = GM_getValue(`index:${kind}`, null);
+    const stored = gm.get(`index:${kind}`, null);
     if (!stored || stored.sig !== indexSignature(s, kind)) return buildIndex(s, kind);
-    if (Date.now() - GM_getValue(`indexChecked:${kind}`, 0) <= FRESHNESS_CHECK) return stored;
-    GM_setValue(`indexChecked:${kind}`, Date.now());
+    if (Date.now() - gm.get(`indexChecked:${kind}`, 0) <= FRESHNESS_CHECK) return stored;
+    gm.set(`indexChecked:${kind}`, Date.now());
     const rebuild = () => buildIndex(s, kind).then(onRebuilt, () => {});
     if (Date.now() - stored.builtAt > INDEX_TTL || Object.keys(stored.errors || {}).length) {
       rebuild();
@@ -1081,10 +1171,7 @@
   }
 
   function clearIndexes() {
-    GM_setValue("index:music", null);
-    GM_setValue("index:films", null);
-    GM_setValue("index:videos", null);
-    location.reload();
+    Promise.all(["index:music", "index:films", "index:videos"].map((key) => gm.set(key, null))).then(() => location.reload());
   }
 
   // ---------------------------------------------------------------------------
@@ -1118,7 +1205,8 @@
   const MARK_STYLE = `
     .lbm { display: inline-flex !important; align-items: center; gap: 4px; margin: 0 0 0 6px !important; padding: 3px 4px !important; border-radius: 4px;
       width: max-content !important; align-self: flex-start;
-      background: rgba(12, 13, 18, 0.85) !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45); vertical-align: calc(var(--lbm-text, 1em) * 0.36 - 6.5px); line-height: 0; }
+      background: rgba(12, 13, 18, 0.85) !important; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45); vertical-align: calc(var(--lbm-text, 1em) * 0.36 - 6.5px); line-height: 0;
+      pointer-events: auto !important; }
     .lbm a { display: inline-flex !important; line-height: 0; border: none !important; text-decoration: none !important; }
     .lbm svg { width: 13px !important; height: 13px !important; display: block; }
     .lbm a:hover { filter: brightness(1.3); }
@@ -1139,6 +1227,18 @@
     .lbm-menu a { display: inline-flex; align-items: center; text-decoration: none !important; gap: 6px !important; padding: 4px 6px; border-radius: 4px; color: #e5e7eb !important; font: 600 12px/14px system-ui, -apple-system, "Segoe UI", sans-serif; white-space: nowrap; }
     .lbm-menu a:hover { background: #1f2430; }
     .lbm-menu svg { width: 13px !important; height: 13px !important; display: block; }
+    .lbm-slot ~ .lbm { align-self: center; }
+    .lbm.lbm-maybe { border: 1px dashed #fbbf24; }
+    .lbm-maybe-link { align-items: center; gap: 2px; color: #fbbf24 !important; font: 700 11px/13px system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .lbm-get .lbm-maybe-link { padding-right: 4px; margin-right: 1px; border-right: 1px solid #4b5563 !important; }
+    .lbm-flash { outline: 3px solid #10b981 !important; outline-offset: 3px; border-radius: 6px; animation: lbm-flash 2.2s ease-out forwards; }
+    @keyframes lbm-flash { 0%, 15%, 30% { outline-color: #10b981; } 8%, 23% { outline-color: rgba(16, 185, 129, 0.2); } 100% { outline-color: transparent; } }
+    .lbm-small-cover > .lbm.lbm-poster { gap: 1px; padding: 2px !important; margin: 2px 0 0 2px !important; }
+    .lbm-small-cover > .lbm.lbm-poster:not(.lbm-get) { flex-wrap: wrap; width: auto !important; max-width: 29px; }
+    .lbm-small-cover > .lbm.lbm-poster + .lbm.lbm-poster { margin-top: 30px !important; }
+    .lbm-small-cover .lbm-get a { line-height: 12px !important; }
+    .lbm-small-cover .lbm.lbm-poster svg { width: 12px !important; height: 12px !important; }
+    .collection-item-art-container > .bc-checkbox { position: absolute !important; inset: auto auto 8px 8px !important; margin: 0 !important; }
     .release_navigation_links:has(> .prev_link > .lbm, > .next_link > .lbm) { overflow: visible; }
     .release_navigation_links .prev_link:has(> .lbm), .release_navigation_links .next_link:has(> .lbm) {
       display: flex; align-items: center; min-width: 0; overflow: visible;
@@ -1211,7 +1311,14 @@
     return null;
   }
 
-  const COMPANION_ONLY = /^(?:the\s+)?(?:remix(?:es|ed)?|instrumentals?|a\s*cappellas?|acapellas?|live\b.*|demos?)$|^(?:(?:part|pt|vol|volume|disc|book|chapter)\s+)?(?:\d+|[ivx]+)$/;
+  // An ID match finds the copy that carries the ID (an album saved on Spotify, a release tagged with a MusicBrainz ID),
+  // which the index may not have grouped with a Navidrome copy credited or titled differently, so the artist and title
+  // match fills in what it's missing.
+  function addTitleMatch(byId, byTitle) {
+    return byId && byTitle && byId !== byTitle && !byId.n ? { ...byTitle, ...byId } : byId || byTitle;
+  }
+
+  const COMPANION_ONLY = /^(?:the\s+)?(?:remix(?:es|ed)?|instrumentals?|a\s*cappellas?|acapellas?|live\b.*|demos?)(?:\s+(?:album|version|edition|mix(?:es)?))?$|^(?:(?:part|pt|vol|volume|disc|book|chapter)\s+)?(?:\d+|[ivx]+)(?:\s.*)?$/;
 
   // Matches by artist and title. When no title matches exactly, a library album by the same artist whose title
   // continues the release's title counts too, so "BRAT" finds a library copy of "Brat and it's completely different
@@ -1250,7 +1357,7 @@
   // title only one album in the library has.
   const keysByTitle = new WeakMap();
 
-  function lookupNameVariant(index, artists, titles) {
+  function titleIndex(index) {
     if (!keysByTitle.has(index)) {
       const byTitle = new Map();
       for (const [key, group] of Object.entries(index.entries)) {
@@ -1262,7 +1369,11 @@
       }
       keysByTitle.set(index, byTitle);
     }
-    const byTitle = keysByTitle.get(index);
+    return keysByTitle.get(index);
+  }
+
+  function lookupNameVariant(index, artists, titles) {
+    const byTitle = titleIndex(index);
     for (const artist of artists) {
       const titleHits = (title) => titleKeys(artist, title).flatMap((key) => byTitle.get(key) || []);
       if (/^various(?:\s+artists)?$/i.test(artist.trim())) {
@@ -1283,6 +1394,30 @@
       for (const title of titles) {
         const hit = titleHits(title).find(([name]) => names.has(name));
         if (hit) return index.groups[hit[1]];
+      }
+    }
+    return null;
+  }
+
+  // An album the matching can't confirm but Navidrome probably has, shown as "not sure" rather than missing: the same
+  // title credited to someone else (Spotify often credits a label, composer or band where the library has a person or
+  // orchestra) when the title is long enough to be distinctive and only one Navidrome album has it, or one of the same
+  // artist's Navidrome albums whose title the page's title only adds words to ("Vanities" for "Vanities (Extended)"),
+  // or that adds words the matching treats as a different release ("YOU ASKED! (Instrumental Album)").
+  function possibleAlbum(index, item) {
+    const artists = (item.artists || []).filter(Boolean);
+    const byTitle = titleIndex(index);
+    for (const title of [item.title].filter(Boolean)) {
+      const keys = new Set((artists.length ? artists : [""]).flatMap((artist) => titleKeys(artist, title)));
+      const groups = new Set([...keys].filter((key) => key.length >= 12).flatMap((key) => (byTitle.get(key) || []).map(([, group]) => group)));
+      const inNavidrome = [...groups].filter((group) => index.groups[group].n);
+      if (inNavidrome.length === 1) return index.groups[inNavidrome[0]];
+      const name = normalizeTitle(title, true);
+      for (const artist of artists) {
+        const artistKey = matchKey(artist);
+        const albums = index.titlesByArtist && Object.hasOwn(index.titlesByArtist, artistKey) ? index.titlesByArtist[artistKey] : [];
+        const hits = albums.filter(([other, group]) => index.groups[group].n && other.length >= 4 && name.length >= 4 && (name.startsWith(`${other} `) || other.startsWith(`${name} `)));
+        if (hits.length && hits.every(([, group]) => group === hits[0][1])) return index.groups[hits[0][1]];
       }
     }
     return null;
@@ -1336,13 +1471,33 @@
     }
   }
 
+  function isCurrentOrigin(url) {
+    try {
+      return !!url && new URL(url).origin === location.origin;
+    } catch {
+      return false;
+    }
+  }
+
+  // On a downloader's own pages, its links would only point back at the page you're on.
+  const DOWNLOADER_URLS = { d: "deemixUrl", t: "tidarrUrl", k: "slskdUrl" };
+  function otherDownloaders(s, codes) {
+    return codes.filter((code) => !isCurrentOrigin(s[DOWNLOADER_URLS[code]]));
+  }
+
   // Counts the items on a list or grid page that are in a library, shown in the corner of the page. Clicking the
   // counter lists them, with the ones you have first; a name scrolls to the item on the page.
-  const tally = { items: new Map(), host: null, open: false, filter: "", hrefs: null, settings: null, version: 0, rendered: -1, countHtml: "" };
+  const tally = { items: new Map(), host: null, open: false, filter: "", query: "", library: "", sort: "page", kind: "", hrefs: null, settings: null, version: 0, rendered: -1, countHtml: "" };
+
+  // An album is in your library once it's in Navidrome, where downloads land (any library while Navidrome isn't set
+  // up); a film, show or video once any library has it.
+  function inLibrary(owned) {
+    return tally.kind === "music" && tally.settings && navidrome.configured(tally.settings) ? !!owned?.n : !!owned;
+  }
 
   // An item Radarr or Sonarr has but doesn't monitor isn't coming, so it still counts as missing.
   function countItem(key, owned, { label = "", el = null, how = "", download = null, note = null } = {}) {
-    const state = owned ? "have" : download?.arr?.[2] ? "coming" : "missing";
+    const state = inLibrary(owned) ? "have" : download?.arr?.[2] ? "coming" : download?.possible ? "unsure" : "missing";
     tally.items.set(key, { owned, label: label || key, el, how, download, note, state });
     tally.version++;
   }
@@ -1352,75 +1507,156 @@
     tally.version++;
   }
 
+  // Scrolls to an item and outlines it for a moment, so it's easy to spot among the others.
+  function flashItem(el) {
+    if (!el?.isConnected) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.remove("lbm-flash");
+    void el.offsetWidth;
+    el.classList.add("lbm-flash");
+    setTimeout(() => el.classList.remove("lbm-flash"), 2200);
+  }
+
   function tallyRow(item) {
     const row = document.createElement("li");
     const name = document.createElement("button");
     name.type = "button";
     name.textContent = item.label;
-    name.addEventListener("click", () => item.el?.isConnected && item.el.scrollIntoView({ behavior: "smooth", block: "center" }));
+    name.addEventListener("click", () => flashItem(item.el));
     row.append(name);
     if (item.owned && tally.hrefs) row.append(createMarker(item.owned, tally.hrefs, item.how, false, item.note));
+    if (item.download?.possible) row.append(createMaybeMarker(item.download.possible, false));
     const links = item.download && !item.download.arr ? downloadLinks(tally.settings, item.download) : [];
     if (item.download?.arr) row.append(createArrMarker(item.download.arr, false));
     else if (links.length) row.append(createGetMarker(links, false, true));
     return row;
   }
 
-  const TALLY_STATES = [["have", "In your library", "Have"], ["coming", "On the way", "On the way"], ["missing", "Not in your library", "Missing"]];
+  const TALLY_STATES = [["have", "In your library", "Have"], ["coming", "On the way", "On the way"], ["unsure", "Not sure, maybe in Navidrome", "Not sure"], ["missing", "Not in your library", "Missing"]];
 
-  // What a download list needs: albums missing from Navidrome, and films and shows no library or arr has.
-  function missingItems() {
-    return [...tally.items.values()].filter((item) => item.state === "missing" || (item.download && !item.download.arr));
+  // The list narrows by state, a search of the names, a library (in it or not) or watched state, and sorts by page order
+  // or name. "Copy list" copies what's shown, one per line as the page names it.
+  function tallyView() {
+    const query = tally.query.trim().toLowerCase();
+    const [negate, field] = tally.library.startsWith("!") ? [true, tally.library.slice(1)] : [false, tally.library];
+    const matches = (item) => {
+      if (query && !item.label.toLowerCase().includes(query)) return false;
+      if (!field) return true;
+      const has = field === "w" ? !!item.note?.watched : !!item.owned?.[field];
+      return has !== negate;
+    };
+    const items = [...tally.items.values()].filter(matches);
+    if (tally.sort === "name") items.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base", numeric: true }));
+    return items;
   }
 
-  async function copyMissing(button) {
-    const text = missingItems().map((item) => item.label).join("\n");
+  function tallyOptions(select, options, value) {
+    select.replaceChildren(...options.map(([optionValue, text]) => new Option(text, optionValue, false, optionValue === value)));
+  }
+
+  async function copyList(button) {
+    const text = tallyView().filter((item) => !tally.filter || item.state === tally.filter).map((item) => item.label).join("\n");
     try {
       await navigator.clipboard.writeText(text);
       button.textContent = "Copied";
     } catch {
-      prompt("Copy the missing items:", text);
+      prompt("Copy the list:", text);
     }
-    setTimeout(() => (button.textContent = "Copy missing"), 1500);
+    setTimeout(() => (button.textContent = "Copy list"), 1500);
+  }
+
+  // The search box, menus and copy button are built once and kept, so typing isn't interrupted as the page adds items.
+  function buildTallyTools(panel) {
+    const tools = document.createElement("div");
+    tools.className = "tools";
+    const search = document.createElement("input");
+    search.type = "search";
+    search.className = "search";
+    search.placeholder = "Search this page";
+    search.value = tally.query;
+    let timer = null;
+    search.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        tally.query = search.value;
+        renderTallyList(panel);
+      }, 150);
+    });
+    for (const type of ["keydown", "keyup", "keypress"]) search.addEventListener(type, (event) => event.stopPropagation());
+    const library = document.createElement("select");
+    library.className = "library";
+    library.title = "Show items in, or not in, one library";
+    library.addEventListener("change", () => {
+      tally.library = library.value;
+      renderTallyList(panel);
+    });
+    const sort = document.createElement("select");
+    sort.className = "sort";
+    sort.title = "Sort the list";
+    tallyOptions(sort, [["page", "Page order"], ["name", "A–Z"]], tally.sort);
+    sort.addEventListener("change", () => {
+      tally.sort = sort.value;
+      renderTallyList(panel);
+    });
+    const copy = document.createElement("button");
+    copy.type = "button";
+    copy.className = "chip copy";
+    copy.textContent = "Copy list";
+    copy.title = "Copy the items shown, one per line";
+    copy.addEventListener("click", () => copyList(copy));
+    const chips = document.createElement("div");
+    chips.className = "chips";
+    tools.append(search, library, sort, copy, chips);
+    const list = document.createElement("div");
+    list.className = "list";
+    panel.replaceChildren(tools, list);
   }
 
   function renderTallyList(panel) {
-    const items = [...tally.items.values()];
+    if (!panel.querySelector(".tools")) buildTallyTools(panel);
+    const all = [...tally.items.values()];
+    const present = new Set(all.flatMap((item) => Object.keys(item.owned || {})));
+    const codes = Object.keys(SERVER_NAMES).filter((code) => present.has(code));
+    const watched = all.some((item) => item.note?.watched);
+    const libraryOptions = [["", "Any library"], ...codes.flatMap((code) => [[code, `In ${SERVER_NAMES[code]}`], [`!${code}`, `Not in ${SERVER_NAMES[code]}`]]), ...(watched ? [["w", "Watched"], ["!w", "Not watched"]] : [])];
+    if (!libraryOptions.some(([value]) => value === tally.library)) tally.library = "";
+    tallyOptions(panel.querySelector(".library"), libraryOptions, tally.library);
+
+    const items = tallyView();
     const counts = Object.fromEntries(TALLY_STATES.map(([state]) => [state, items.filter((item) => item.state === state).length]));
-    if (tally.filter && !counts[tally.filter]) tally.filter = "";
-    const tools = document.createElement("div");
-    tools.className = "tools";
+    if (tally.filter && !counts[tally.filter] && !tally.query && !tally.library) tally.filter = "";
+    const chips = panel.querySelector(".chips");
+    chips.replaceChildren();
     for (const [state, , chipName] of [["", "", "All"], ...TALLY_STATES]) {
-      if (state && !counts[state]) continue;
+      if (state && !counts[state] && tally.filter !== state) continue;
       const chip = document.createElement("button");
       chip.type = "button";
       chip.className = tally.filter === state ? "chip active" : "chip";
-      chip.textContent = state ? `${chipName} ${counts[state]}` : chipName;
+      chip.textContent = state ? `${chipName} ${counts[state]}` : `${chipName} ${items.length}`;
       chip.addEventListener("click", () => {
         tally.filter = state;
         renderTallyList(panel);
       });
-      tools.append(chip);
+      chips.append(chip);
     }
-    if (missingItems().length) {
-      const copy = document.createElement("button");
-      copy.type = "button";
-      copy.className = "chip copy";
-      copy.textContent = "Copy missing";
-      copy.title = "Copy the missing items, one per line";
-      copy.addEventListener("click", () => copyMissing(copy));
-      tools.append(copy);
-    }
+
+    const list = panel.querySelector(".list");
     const scrollTop = panel.scrollTop;
-    panel.replaceChildren(tools);
+    list.replaceChildren();
     for (const [state, heading] of TALLY_STATES) {
-      const list = items.filter((item) => item.state === state);
-      if (!list.length || (tally.filter && tally.filter !== state)) continue;
+      const rows = items.filter((item) => item.state === state);
+      if (!rows.length || (tally.filter && tally.filter !== state)) continue;
       const title = document.createElement("h4");
-      title.textContent = `${heading} (${list.length})`;
+      title.textContent = `${heading} (${rows.length})`;
       const ul = document.createElement("ul");
-      ul.append(...list.map(tallyRow));
-      panel.append(title, ul);
+      ul.append(...rows.map(tallyRow));
+      list.append(title, ul);
+    }
+    if (!list.childElementCount) {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = "Nothing matches.";
+      list.append(empty);
     }
     panel.scrollTop = scrollTop;
     tally.rendered = tally.version;
@@ -1440,7 +1676,12 @@
         .count:hover { background: #1f2430; }
         .count b { color: #10b981; }
         .count i { font-style: normal; color: #fbbf24; }
-        .tools { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 0 2px; }
+        .tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 0 2px; position: sticky; top: -4px; background: #151821; z-index: 1; }
+        .search { flex: 1 1 100%; box-sizing: border-box; padding: 5px 9px; border-radius: 6px; border: 1px solid #374151; background: #0c0d12; color: #e5e7eb; font: inherit; font-weight: 500; outline: none; }
+        .search:focus { border-color: #10b981; }
+        select { padding: 3px 6px; border-radius: 6px; border: 1px solid #374151; background: #0c0d12; color: #d1d5db; font: inherit; font-size: 11px; cursor: pointer; }
+        .chips { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 100%; }
+        .empty { margin: 10px 0 4px; color: #9ca3af; font-weight: 500; }
         .chip { all: unset; padding: 3px 9px; border-radius: 999px; border: 1px solid #374151; color: #d1d5db; font-size: 11px; cursor: pointer; }
         .chip:hover { background: #1f2430; }
         .chip.active { border-color: #10b981; color: #10b981; }
@@ -1467,7 +1708,8 @@
     const items = [...tally.items.values()];
     const owned = items.filter((item) => item.state === "have").length;
     const coming = items.filter((item) => item.state === "coming").length;
-    const countHtml = `<b>${owned}</b> of ${tally.items.size} on this page in your library${coming ? ` · <i>${coming} on the way</i>` : ""}`;
+    const unsure = items.filter((item) => item.state === "unsure").length;
+    const countHtml = `<b>${owned}</b> of ${tally.items.size} on this page in your library${coming ? ` · <i>${coming} on the way</i>` : ""}${unsure ? ` · <i>${unsure} not sure</i>` : ""}`;
     if (countHtml !== tally.countHtml) {
       tally.countHtml = countHtml;
       setHtml(tally.host.shadowRoot.querySelector(".count"), countHtml);
@@ -1526,7 +1768,7 @@
       for (const old of section.querySelectorAll(".lbm")) old.remove();
       const album = parseRym();
       if (!album || !issues.length) continue;
-      const group = lookupGroup(index, album.spotifyIds.map((id) => `spotify:${id}`)) || lookupAlbum(index, album.artists, [album.title]);
+      const group = addTitleMatch(lookupGroup(index, album.spotifyIds.map((id) => `spotify:${id}`)), lookupAlbum(index, album.artists, [album.title]));
       markVersions(group, album.title, issues, hrefs);
     }
   }
@@ -1547,7 +1789,7 @@
   // own artist is tried too when the link's artist includes it.
   function scanRym(index, hrefs) {
     scanRymIssues(index, hrefs);
-    const pageSlug = location.pathname.match(/^\/artist\/([^/]+)/)?.[1];
+    const pageSlug = currentPath().match(/^\/artist\/([^/]+)/)?.[1];
     const pageArtist = pageSlug ? document.querySelector("h1.artist_name_hdr")?.textContent.trim() || slugText(pageSlug) : "";
     for (const link of document.querySelectorAll('a[href*="/release/"]')) {
       if (link.closest(".release_navigation_guidance, .section_issues")) continue;
@@ -1555,11 +1797,11 @@
       const url = linkUrl(link);
       const match = url?.pathname.match(/^\/release\/[^/]+\/([^/]+)\/([^/]+)\/?$/);
       const text = link.textContent.trim();
-      if (!match || !text || url.hostname !== location.hostname || url.pathname === location.pathname) continue;
+      if (!match || !text || url.hostname !== location.hostname || url.pathname === currentPath()) continue;
       const media = link.closest(".page_charts_section_charts_item")?.querySelector('[id^="media_link_button_container"]');
       const bySpotify = lookupGroup(index, mediaIds(media, "spotify").map((id) => `spotify:${id}`));
       const collaboration = pageArtist && match[1] !== pageSlug && `-${match[1]}-`.includes(`-${pageSlug}-`);
-      const group = bySpotify || lookupRelease(index, match[1], match[2], text, collaboration ? [pageArtist] : []);
+      const group = addTitleMatch(bySpotify, lookupRelease(index, match[1], match[2], text, collaboration ? [pageArtist] : []));
       const owned = orderedOwned(group, "music");
       const how = bySpotify ? "Spotify album ID" : "artist and title";
       const download = wantsDownload("music", group, { artists: [slugText(match[1])], title: text, deezerIds: mediaIds(media, "deezer"), tidalIds: mediaIds(media, "tidal") });
@@ -1579,7 +1821,7 @@
   let verifyQueue = Promise.resolve();
 
   function letterboxdTmdb(slug) {
-    const known = GM_getValue(TMDB_CACHE_KEY, {});
+    const known = gm.get(TMDB_CACHE_KEY, {});
     if (Object.hasOwn(known, slug)) return Promise.resolve(known[slug]);
     const run = async () => {
       const res = await fetch(`${location.origin}/film/${slug}/`, { credentials: "include" });
@@ -1588,11 +1830,11 @@
       const id = html.match(/data-tmdb-id="(\d+)"/)?.[1];
       const type = html.match(/data-tmdb-type="(\w+)"/)?.[1] === "tv" ? "tv" : "movie";
       const value = id ? `${type}:${id}` : null;
-      const cache = GM_getValue(TMDB_CACHE_KEY, {});
+      const cache = gm.get(TMDB_CACHE_KEY, {});
       cache[slug] = value;
       const keys = Object.keys(cache);
       for (const old of keys.slice(0, Math.max(0, keys.length - TMDB_CACHE_LIMIT))) delete cache[old];
-      GM_setValue(TMDB_CACHE_KEY, cache);
+      gm.set(TMDB_CACHE_KEY, cache);
       return value;
     };
     const result = verifyQueue.then(run, run);
@@ -1603,7 +1845,7 @@
   // Posters don't say whether an item is a film or a show, so a missing one offers both Radarr and Sonarr. A check that
   // finishes after the page was marked again (a rebuilt index) is dropped.
   function scanLetterboxd(index, hrefs) {
-    const currentSlug = location.pathname.match(/^\/film\/([^/]+)/)?.[1];
+    const currentSlug = currentPath().match(/^\/film\/([^/]+)/)?.[1];
     const pass = scanned;
     for (const poster of document.querySelectorAll("[data-item-slug][data-item-name]")) {
       if (alreadyScanned(poster, poster.dataset.itemSlug)) continue;
@@ -1645,13 +1887,20 @@
   // Marks one link: in the corner when it wraps (or overlays) a cover or poster, otherwise right after the link text.
   function placeMarker(link, owned, hrefs, how, poster = link.querySelector("img") ? link : null, note = null) {
     attachMarker(link, createMarker(owned, hrefs, how, !!poster, note), poster);
-    if (poster && tally.settings?.displayDim === "on") poster.classList.add("lbm-dimmed");
+    if (poster && tally.settings?.displayDim === "on" && inLibrary(owned)) poster.classList.add("lbm-dimmed");
   }
 
+  // A possible Navidrome match goes in front of the ↓, so a cover holds at most two markers.
   function placeGet(link, download, poster = link.querySelector("img") ? link : null) {
     if (download?.arr) return attachMarker(link, createArrMarker(download.arr, !!poster), poster);
     const links = download ? downloadLinks(tally.settings, download) : [];
-    if (links.length) attachMarker(link, createGetMarker(links, !!poster), poster);
+    if (links.length) {
+      const marker = createGetMarker(links, !!poster);
+      if (download.possible) marker.prepend(maybeLink(download.possible));
+      attachMarker(link, marker, poster);
+    } else if (download?.possible) {
+      attachMarker(link, createMaybeMarker(download.possible, !!poster), poster);
+    }
   }
 
   // Corner icons go first in the cover, absolutely positioned without offsets, so they sit at its top-left corner
@@ -1682,12 +1931,35 @@
 
   // Albums get the ↓ while Navidrome (where downloads land) doesn't have them, films and shows while no library has
   // them. A film or show Radarr or Sonarr already has gets that service's icon instead, since it's on its way.
+  // An album Navidrome probably has under another credit or title also carries that possible match. With the ↓ turned
+  // off, only the possible match is kept.
   function wantsDownload(kind, group, item) {
     const s = tally.settings;
-    if (!s || s.displayGet === "off" || !item) return null;
+    if (!s || !item) return null;
     const missing = kind === "music" && navidrome.configured(s) ? !group?.n : !orderedOwned(group, kind);
     if (!missing || (kind !== "music" && kind !== "films")) return null;
-    return { kind, item, arr: kind === "films" ? arrEntry(item) : null };
+    const possible = kind === "music" && navidrome.configured(s) && markerIndex ? possibleAlbum(markerIndex, item) : null;
+    const hidden = s.displayGet === "off";
+    if (hidden && !possible) return null;
+    return { kind, item, arr: kind === "films" && !hidden ? arrEntry(item) : null, possible, hidden };
+  }
+
+  function maybeLink(group) {
+    const link = document.createElement("a");
+    link.className = "lbm-maybe-link";
+    link.href = tally.hrefs?.n?.(group.n) || "";
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.title = `Not sure: Navidrome may have this as "${group._}". Open it to check.`;
+    link.append(iconSvg("n"), "?");
+    return link;
+  }
+
+  function createMaybeMarker(group, poster) {
+    const marker = document.createElement("span");
+    marker.className = poster ? "lbm lbm-maybe lbm-poster" : "lbm lbm-maybe";
+    marker.append(maybeLink(group));
+    return marker;
   }
 
   // What Radarr and Sonarr already have, by TMDB, IMDb or TVDB ID and by title and year, as [code, title slug,
@@ -1721,13 +1993,13 @@
   function loadArrItems(s, onFresh) {
     if (arrLoading || (!(radarr.configured(s) && s.radarrApiKey) && !(sonarr.configured(s) && s.sonarrApiKey))) return;
     const sig = `${INDEX_VERSION}|${s.radarrUrl}|${s.sonarrUrl}`;
-    const cached = GM_getValue(ARR_KEY, null);
+    const cached = gm.get(ARR_KEY, null);
     if (cached?.sig === sig) {
       arrItems = cached.items;
       if (Date.now() - cached.builtAt < ARR_TTL) return;
     }
     arrLoading = fetchArrItems(s).then((items) => {
-      GM_setValue(ARR_KEY, { sig, builtAt: Date.now(), items });
+      gm.set(ARR_KEY, { sig, builtAt: Date.now(), items });
       arrItems = items;
       onFresh();
     }, () => {}).finally(() => {
@@ -1736,8 +2008,8 @@
   }
 
   function expireArrItems() {
-    const cached = GM_getValue(ARR_KEY, null);
-    if (cached) GM_setValue(ARR_KEY, { ...cached, builtAt: 0 });
+    const cached = gm.get(ARR_KEY, null);
+    if (cached) gm.set(ARR_KEY, { ...cached, builtAt: 0 });
   }
 
   function arrEntry(item) {
@@ -1766,12 +2038,12 @@
 
   // Where a missing item can be downloaded or added, the chosen default first. Albums carry their artists, title and
   // Deezer IDs; films and shows their type, title and year.
-  function downloadLinks(s, { kind, item }) {
-    if (!s) return [];
+  function downloadLinks(s, { kind, item, hidden }) {
+    if (!s || hidden) return [];
     if (kind === "music") {
       const album = { artists: item.artists || [], title: item.title, deezerIds: item.deezerIds || [], tidalIds: item.tidalIds || [] };
       const preferred = s.musicDownloader || "d";
-      return configuredCodes(s, [["d", deemix], ["t", tidarr], ["k", slskd], ["c", bandcamp]])
+      return otherDownloaders(s, configuredCodes(s, [["d", deemix], ["t", tidarr], ["k", slskd], ["c", bandcamp]]))
         .sort((a, b) => (b === preferred) - (a === preferred))
         .map((code) => ({ code, href: SERVERS[code].link(s, album), title: code === "k" ? "Open slskd's search page" : `${code === "c" ? "Buy" : "Download"} "${albumQuery(album)}" with ${SERVER_NAMES[code]}` }));
     }
@@ -1858,11 +2130,11 @@
   const scanDiscogs = linkScanner('a[href*="/master/"], a[href*="/release/"]', "music",
     (url) => {
       const [, type, id] = url.pathname.match(/^\/(?:[a-z]{2}\/)?(master|release)\/(\d+)/) || [];
-      if (!type || (type === "release" && /^\/(?:[a-z]{2}\/)?(?:master|release)\//.test(location.pathname))) return null;
+      if (!type || (type === "release" && /^\/(?:[a-z]{2}\/)?(?:master|release)\//.test(currentPath()))) return null;
       return `${type}:${id}`;
     },
     (index, link, key, label) => {
-      const pageArtist = /^\/(?:[a-z]{2}\/)?artist\//.test(location.pathname) ? document.querySelector("h1")?.textContent : "";
+      const pageArtist = /^\/(?:[a-z]{2}\/)?artist\//.test(currentPath()) ? document.querySelector("h1")?.textContent : "";
       // The artist comes from the item's own card; a link outside any card (Discogs' "Random Item") is skipped.
       let card = link.parentElement;
       for (let depth = 0; card && depth < 5 && !card.querySelector('a[href*="/artist/"]'); depth++) card = card.parentElement;
@@ -1895,10 +2167,13 @@
     for (const item of document.querySelectorAll("li.recommended-album")) {
       items.push({ item, link: item.querySelector("a.album-link"), title: item.dataset.albumtitle, artist: item.dataset.artist, poster: item.querySelector(".album-art-container") });
     }
+    // Private albums in your own collection have no album link, only the title and a link to the artist.
     for (const item of document.querySelectorAll(".collection-item-container")) {
-      const title = item.querySelector(".collection-item-title")?.firstChild?.textContent.trim();
+      const titleEl = item.querySelector(".collection-item-title");
       const poster = item.querySelector(".collection-item-art-container, .tralbum-art-container") || item.querySelector("img")?.closest("div");
-      items.push({ item, link: item.querySelector('a[href*="/album/"]'), title, artist: byline(item.querySelector(".collection-item-artist")), poster });
+      const privateAlbum = titleEl?.classList.contains("private") && item.dataset.tralbumtype === "a";
+      const link = privateAlbum ? titleEl : item.querySelector('a[href*="/album/"]');
+      items.push({ item, link, key: privateAlbum ? `bandcamp:album:${item.dataset.tralbumid}` : "", title: titleEl?.firstChild?.textContent.trim(), artist: byline(item.querySelector(".collection-item-artist")), poster });
     }
     for (const item of document.querySelectorAll("li.searchresult")) {
       if (item.querySelector(".itemtype")?.textContent.trim().toUpperCase() !== "ALBUM") continue;
@@ -1916,11 +2191,11 @@
 
   function scanBandcamp(index, hrefs) {
     trackTallyPage();
-    for (const { item, link, title, artist, poster } of bandcampItems()) {
-      const url = link && linkUrl(link);
-      if (!url || !title || !artist) continue;
-      const key = url.origin + url.pathname;
-      if (url.pathname === location.pathname || alreadyScanned(item, key)) continue;
+    for (const { item, link, key: itemKey, title, artist, poster } of bandcampItems()) {
+      const url = !itemKey && link ? linkUrl(link) : null;
+      const key = itemKey || (url && url.origin + url.pathname);
+      if (!link || !key || !title || !artist) continue;
+      if (url?.pathname === currentPath() || alreadyScanned(item, key)) continue;
       for (const old of item.querySelectorAll(".lbm")) old.remove();
       for (const dimmed of item.querySelectorAll(".lbm-dimmed")) dimmed.classList.remove("lbm-dimmed");
       const group = lookupAlbum(index, [artist], [title]);
@@ -1931,6 +2206,143 @@
       if (owned) placeMarker(link, owned, hrefs, "artist and title", cover);
       placeGet(link, download, cover);
     }
+  }
+
+  // Spotify, Deemix, Tidarr and Spicetify Library pages mark the albums they list. Cards carry the album's link, title
+  // and artists, and Spotify album IDs where the page has them (enough on their own when a card shows no artist); a
+  // cover big enough takes the icons, otherwise they go after the title.
+  function markAlbums(index, hrefs, albums, page) {
+    trackTallyPage(page);
+    for (const { item, key, title, artists, link, poster, spotifyId } of albums) {
+      if (!key || !title || !(artists.length || spotifyId) || !link || alreadyScanned(item, key)) continue;
+      for (const old of item.querySelectorAll(".lbm")) old.remove();
+      for (const dimmed of item.querySelectorAll(".lbm-dimmed")) dimmed.classList.remove("lbm-dimmed");
+      const bySpotify = spotifyId ? lookupGroup(index, [`spotify:${spotifyId}`]) : null;
+      const group = addTitleMatch(bySpotify, lookupAlbum(index, artists, [title]));
+      const how = bySpotify ? "Spotify album ID" : "artist and title";
+      const owned = orderedOwned(group, "music");
+      const download = wantsDownload("music", group, { artists, title });
+      countItem(key, owned, { label: artists.length ? `${artists.join(", ")} – ${title}` : title, el: item, how, download });
+      if (owned) placeMarker(link, owned, hrefs, how, poster);
+      placeGet(link, download, poster);
+    }
+  }
+
+  // Spotify cards name their album in aria-labelledby ("card-title-spotify:album:<id>-0"). Search and home cards credit
+  // the artist under the title; discography cards ("Discography", "More by …" and the full discography page) show the
+  // year instead, so they take the artist their shelf's "Show all" link or the page belongs to. Your Library's cards
+  // name the artist in plain text ("Album • Artist", "New releaseAlbum • Artist"). Covers in its list view are too
+  // small for a row of icons, so they get a grid of smaller ones. The desktop app marks shelves as labelled sections and
+  // leaves out some test IDs the web player has.
+  const SPOTIFY_ENTITY_TITLE = '[data-testid="entityTitle"], [data-testid="adaptiveEntityTitle"]';
+
+  function spotifyArtistName(id) {
+    const link = document.querySelector(`main a[href="/artist/${id}"]`)?.textContent.trim();
+    return link || (currentPath().startsWith(`/artist/${id}`) ? document.querySelector(SPOTIFY_ENTITY_TITLE)?.textContent.trim() || "" : "");
+  }
+
+  function spotifyShelfLink(item) {
+    const shelf = item.closest('[data-testid="component-shelf"], section[aria-label]');
+    return shelf?.querySelector('[data-testid="see-all-link"], a[href^="/artist/"][href*="/discography"]')?.getAttribute("href") || "";
+  }
+
+  function scanSpotify(index, hrefs) {
+    const pageDiscography = currentPath().match(/^\/artist\/([A-Za-z0-9]+)\/discography/)?.[1];
+    const albums = [];
+    for (const item of document.querySelectorAll('[data-encore-id="card"]')) {
+      const spotifyId = item.getAttribute("aria-labelledby")?.match(/spotify:album:([A-Za-z0-9]+)/)?.[1];
+      if (!spotifyId) continue;
+      const credited = [...item.querySelectorAll('[data-encore-id="cardSubtitle"] a[href^="/artist/"]')].map((a) => a.textContent.trim()).filter(Boolean);
+      const discography = spotifyShelfLink(item).match(/^\/artist\/([A-Za-z0-9]+)\/discography/)?.[1] || pageDiscography;
+      const owner = credited.length || !discography ? "" : spotifyArtistName(discography);
+      const subtitle = item.querySelector('[data-encore-id="cardSubtitle"]');
+      const byline = credited.length ? "" : subtitle?.textContent.match(/(?:album|single|ep|compilation)\s*•\s*(.+)$/i)?.[1].trim();
+      const artists = credited.length ? credited : byline ? [...new Set([byline, ...byline.split(", ")])] : owner ? [owner] : [];
+      const titleEl = item.querySelector('[data-encore-id="cardTitle"]');
+      const poster = (item.querySelector('[data-testid="card-image"]') || item.querySelector("img"))?.parentElement?.parentElement;
+      if (poster && poster.dataset.lbmSized !== spotifyId) {
+        const width = poster.getBoundingClientRect().width;
+        poster.classList.toggle("lbm-small-cover", width ? width < 64 : item.matches('[class*="card--small"]'));
+        poster.dataset.lbmSized = spotifyId;
+      }
+      albums.push({ item, key: spotifyId, title: titleEl?.textContent.trim(), artists, link: titleEl, poster, spotifyId });
+    }
+    markAlbums(index, hrefs, [...albums, ...spicetifyAppCards()]);
+  }
+
+  // Album cards from the Random Library and Release List apps, inside Spotify and in Spicetify Library's copy of them.
+  // The copy links each card to the album on Spotify; inside Spotify the cards carry the album's URI instead (older
+  // versions of the apps carry neither, so they match by artist and title). Artist cards have no album art and are left out.
+  function spicetifyAppCards() {
+    const albums = [];
+    for (const item of document.querySelectorAll(".rl-card")) {
+      const poster = item.querySelector(".rl-card-artwork-wrapper");
+      const titleEl = item.querySelector(".rl-card-title");
+      if (!poster || !titleEl) continue;
+      const link = titleEl.closest('a[href*="/album/"]') || titleEl.querySelector('a[href*="/album/"]') || (titleEl.matches('a[href*="/album/"]') ? titleEl : null);
+      const spotifyId = link?.href.match(/\/album\/([A-Za-z0-9]+)/)?.[1] || item.dataset.uri?.match(/^spotify:album:([A-Za-z0-9]+)$/)?.[1];
+      const title = titleEl.textContent.trim();
+      const artists = [...item.querySelectorAll(".rl-card-artist")].map((a) => a.textContent.trim()).filter(Boolean);
+      albums.push({ item, key: spotifyId || `${artists.join(", ")}|${title}`, title, artists, link: titleEl, poster, spotifyId });
+    }
+    return albums;
+  }
+
+  // Spicetify Library's albums, Discover and Release List tabs. Tabs switch by the URL's hash, so each tab gets its own
+  // page count.
+  function scanSpicetifyLibrary(index, hrefs) {
+    markAlbums(index, hrefs, spicetifyAppCards(), currentPath() + location.hash);
+  }
+
+  // Deemix puts icons drawn as text ("explicit") and tags such as "NEW" inside its titles, so only the title's own text counts.
+  function ownText(el) {
+    return [...(el?.childNodes || [])].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim();
+  }
+
+  // Table rows put the icons inside the title, after its text and tags, so they share the title's line.
+  function inlineSlot(titleEl) {
+    let slot = titleEl.querySelector(":scope > .lbm-slot");
+    if (!slot) {
+      slot = document.createElement("span");
+      slot.className = "lbm-slot";
+      titleEl.append(slot);
+    }
+    return slot;
+  }
+
+  // Search, chart and favorites cards show the cover with the title and "by Artist - 12 tracks" under it; artist
+  // pages list albums in a table, with the artist in the page heading.
+  function scanDeemix(index, hrefs) {
+    const albums = [];
+    for (const item of document.querySelectorAll(".release")) {
+      const key = item.querySelector('[data-link*="/album/"]')?.dataset.link;
+      const link = item.querySelector(".primary-text");
+      const artist = item.querySelector(".secondary-text")?.textContent.replace(/^\s*by\s+/i, "").replace(/\s+-\s+\d+\s+tracks?\s*$/i, "").trim();
+      albums.push({ item, key, title: ownText(link), artists: artist ? [artist] : [], link, poster: item.querySelector(".cover-container") });
+    }
+    const pageArtist = currentPath().startsWith("/artist/") ? document.querySelector("h1")?.textContent.trim() : "";
+    for (const item of document.querySelectorAll("tbody tr")) {
+      const key = item.querySelector('[data-cm-link*="/album/"]')?.dataset.cmLink;
+      const titleEl = item.querySelector('td[role="link"] > div > span');
+      albums.push({ item, key, title: ownText(titleEl), artists: pageArtist ? [pageArtist] : [], link: titleEl && inlineSlot(titleEl), poster: null });
+    }
+    markAlbums(index, hrefs, albums);
+  }
+
+  // Album cards link the cover and the title to the album, with the artists as buttons after "by".
+  function scanTidarr(index, hrefs) {
+    const current = currentPath().match(/^\/album\/(\d+)/)?.[1];
+    const albums = [];
+    for (const item of document.querySelectorAll(".MuiCard-root")) {
+      const links = [...item.querySelectorAll('a[href^="/album/"]')];
+      const key = links[0]?.getAttribute("href");
+      if (!key || key === `/album/${current}`) continue;
+      const title = links.map((a) => a.querySelector("strong")).find(Boolean);
+      const poster = links.find((a) => a.querySelector("img") && !a.querySelector(".MuiAvatar-root"));
+      const artists = [...item.querySelectorAll(".MuiTypography-subtitle2 button")].map((button) => button.textContent.trim()).filter(Boolean);
+      albums.push({ item, key, title: title?.textContent.trim(), artists, link: title?.closest("a"), poster });
+    }
+    markAlbums(index, hrefs, albums);
   }
 
   // Most sites link each item from a URL that names it. keyOf(url) names the item (null for other links), and
@@ -1998,7 +2410,7 @@
 
   // A release group's table lists every version of one album; its "Format" column says which are digital.
   function scanMusicBrainzReleases(index, hrefs) {
-    if (!location.pathname.startsWith("/release-group/")) return;
+    if (!currentPath().startsWith("/release-group/")) return;
     const table = document.querySelector("#content table.tbl");
     if (!table) return;
     const format = [...table.querySelectorAll("thead th")].findIndex((th) => th.textContent.trim() === "Format");
@@ -2019,7 +2431,7 @@
     for (const old of table.querySelectorAll(".lbm")) old.remove();
     const album = parseMusicBrainz();
     if (!album || !versions.length) return;
-    const group = lookupGroup(index, [...album.mbids, ...versions.map((version) => version.id)].map((id) => `mb:${id}`)) || lookupAlbum(index, album.artists, [album.title]);
+    const group = addTitleMatch(lookupGroup(index, [...album.mbids, ...versions.map((version) => version.id)].map((id) => `mb:${id}`)), lookupAlbum(index, album.artists, [album.title]));
     markVersions(group, album.title, versions, hrefs);
   }
 
@@ -2029,9 +2441,9 @@
   }
 
   const musicBrainzLinks = linkScanner('a[href*="/release-group/"], a[href*="/release/"]', "music",
-    (url) => (location.pathname.startsWith("/release-group/") && url.pathname.startsWith("/release/") ? null : url.pathname.match(/^\/release(?:-group)?\/([0-9a-f-]{36})\/?$/)?.[1]),
+    (url) => (currentPath().startsWith("/release-group/") && url.pathname.startsWith("/release/") ? null : url.pathname.match(/^\/release(?:-group)?\/([0-9a-f-]{36})\/?$/)?.[1]),
     (index, link, mbid, label) => {
-      if (location.pathname.includes(mbid) || document.querySelector(`.releaseheader a[href*="${mbid}"]`)) return { skip: true };
+      if (currentPath().includes(mbid) || document.querySelector(`.releaseheader a[href*="${mbid}"]`)) return { skip: true };
       // Search, label and similar tables name the artist in each row; artist pages only in the header.
       const rowArtists = [...(link.closest("tr")?.querySelectorAll('a[href*="/artist/"]') || [])].map((a) => a.textContent.trim());
       const header = document.querySelector(".artistheader h1 a, .rgheader .subheader a[href*='/artist/']")?.textContent.trim();
@@ -2097,8 +2509,7 @@
   // the page, such as YouTube's home page when you come back to it, are scanned again so they're counted again.
   let tallyPage = "";
 
-  function trackTallyPage() {
-    const page = location.pathname + location.search;
+  function trackTallyPage(page = currentPath() + location.search) {
     if (page === tallyPage) return;
     tallyPage = page;
     resetTally();
@@ -2153,6 +2564,7 @@
     const hrefs = makeHrefs(s, machine);
     tally.hrefs = hrefs;
     tally.settings = s;
+    tally.kind = kind;
     // A site's markup changing shouldn't take the page's badges or later rescans down with it.
     const rescan = (index) => {
       if (!scan) return;
@@ -2241,8 +2653,10 @@
     .action .mark { color: #9ca3af; }
     .error { border-color: #f87171; }
     .error .mark { color: #f87171; }
+    .maybe { border-style: dashed; border-color: #fbbf24; }
+    .maybe .mark { color: #fbbf24; }
   `;
-  const MARKS = { checking: "…", owned: "✓", missing: "✕", action: "↗", error: "!" };
+  const MARKS = { checking: "…", owned: "✓", maybe: "?", missing: "✕", action: "↗", error: "!" };
 
   function createBadgeRow(anchor, position = "afterend") {
     document.getElementById("library-badges")?.remove();
@@ -2307,7 +2721,7 @@
   // Spotify albums and every service grouped with it; otherwise artist and title decide.
   function runAlbumPage(s, album, scan) {
     const libraries = configuredCodes(s, INDEX_SOURCES.music);
-    const downloads = configuredCodes(s, [["d", deemix], ["t", tidarr], ["k", slskd], ["c", bandcamp]]);
+    const downloads = otherDownloaders(s, configuredCodes(s, [["d", deemix], ["t", tidarr], ["k", slskd], ["c", bandcamp]]));
     if (!libraries.length && !downloads.length) return showSetup(album.anchor);
 
     const addBadge = createBadgeRow(album.anchor, album.position);
@@ -2323,14 +2737,17 @@
     startMarkers(s, "music", scan, (index, hrefs) => {
       const byMbid = lookupGroup(index, album.mbids.map((id) => `mb:${id}`));
       const bySpotify = byMbid ? null : lookupGroup(index, album.spotifyIds.map((id) => `spotify:${id}`));
-      const group = byMbid || bySpotify || lookupAlbum(index, album.artists, [album.title]);
+      const group = addTitleMatch(byMbid || bySpotify, lookupAlbum(index, album.artists, [album.title]));
       const how = byMbid ? "MusicBrainz ID" : bySpotify ? "Spotify album ID" : "artist and title";
+      let possible = null;
       for (const [code, set] of setters) {
         const name = SERVER_NAMES[code];
         if (index.errors[code]) {
           set("error", { title: `${name}: ${index.errors[code]}` });
         } else if (group?.[code]) {
           set("owned", { href: hrefs[code](group[code]), title: `In ${name} (matched by ${how})` });
+        } else if (code === "n" && (possible = possibleAlbum(index, album))) {
+          set("maybe", { href: hrefs.n(possible.n), title: `Not sure: Navidrome may have this as "${possible._}". Click to open it and check.` });
         } else {
           const query = code === "n" ? album.title : albumQuery(album);
           const href = code === "s" && album.spotifyIds[0] ? `https://open.spotify.com/album/${album.spotifyIds[0]}` : SEARCH[code](s, query);
@@ -2494,6 +2911,33 @@
     return albumPage(titleEl, title, artists.filter(Boolean), media);
   }
 
+  // The badges go under the play button row, since the album header has a fixed height.
+  function parseSpotify() {
+    const id = currentPath().match(/^\/album\/([A-Za-z0-9]+)/)?.[1];
+    const titleEl = document.querySelector('[data-testid="album-page"] :is([data-testid="entityTitle"], [data-testid="adaptiveEntityTitle"])');
+    const anchor = document.querySelector('[data-testid="album-page"] [data-testid="action-bar-row"]');
+    const artists = [...document.querySelectorAll('[data-testid="entity-header"] [data-testid="creator-link"]')].map((a) => a.textContent.trim()).filter(Boolean);
+    const page = id && titleEl && anchor ? albumPage(anchor, titleEl.textContent.trim(), artists) : null;
+    return page && { ...page, spotifyIds: [id] };
+  }
+
+  function parseDeemix() {
+    const id = currentPath().match(/^\/album\/(\d+)/)?.[1];
+    const titleEl = document.querySelector(".image-header h1");
+    const artist = document.querySelector(".image-header h2 p")?.textContent.split("•")[0].trim();
+    const page = id && titleEl ? albumPage(titleEl, ownText(titleEl), artist ? [artist] : []) : null;
+    return page && { ...page, deezerIds: [id] };
+  }
+
+  function parseTidarr() {
+    const id = currentPath().match(/^\/album\/(\d+)/)?.[1];
+    const titleEl = document.querySelector("h1.MuiTypography-root");
+    const header = titleEl?.closest(".MuiCardContent-root");
+    const artists = [...(header?.querySelectorAll(".MuiTypography-subtitle2 button") || [])].map((button) => button.textContent.trim()).filter(Boolean);
+    const page = id && titleEl ? albumPage(titleEl.closest("a") || titleEl, titleEl.textContent.trim(), artists) : null;
+    return page && { ...page, tidalIds: [id] };
+  }
+
   function parseLetterboxd() {
     const tmdb = document.body.dataset.tmdbId;
     const anchor = document.querySelector(".details h1.primaryname, .details h1");
@@ -2504,12 +2948,12 @@
       type: document.body.dataset.tmdbType === "tv" ? "tv" : "movie",
       title: anchor.textContent.trim(),
       year: document.querySelector(".details .releasedate a")?.textContent.trim() || "",
-      slug: location.pathname.match(/^\/film\/([^/]+)/)?.[1] || "",
+      slug: currentPath().match(/^\/film\/([^/]+)/)?.[1] || "",
     };
   }
 
   function parseBandcamp() {
-    if (!location.pathname.startsWith("/album/")) return null;
+    if (!currentPath().startsWith("/album/")) return null;
     const anchor = document.querySelector("#name-section h2.trackTitle, #name-section h2");
     const og = document.querySelector('meta[property="og:title"]')?.content || "";
     const split = og.lastIndexOf(", by ");
@@ -2519,7 +2963,7 @@
 
   // Discogs' header is a grid beside the cover, so the badges go at the top of the info block under the title.
   function parseDiscogs() {
-    if (!/^\/(?:[a-z]{2}\/)?(release|master)\/\d+/.test(location.pathname)) return null;
+    if (!/^\/(?:[a-z]{2}\/)?(release|master)\/\d+/.test(currentPath())) return null;
     const heading = document.querySelector("h1");
     if (!heading) return null;
     const artists = [...heading.querySelectorAll('a[href*="/artist/"]')].map((a) => discogsName(a.textContent));
@@ -2531,7 +2975,7 @@
   }
 
   function parseAoty() {
-    if (!/^\/album\//.test(location.pathname)) return null;
+    if (!/^\/album\//.test(currentPath())) return null;
     const headline = document.querySelector(".albumHeadline");
     const anchor = headline?.querySelector(".albumTitle") || document.querySelector(".albumTitle") || document.querySelector("h1");
     const artist = headline?.querySelector(".artist")?.textContent.trim() || document.querySelector("h1.artist")?.textContent.trim();
@@ -2543,7 +2987,7 @@
 
   // MusicBrainz release and release group pages match by MBID first, as tagged by Picard or beets.
   function parseMusicBrainz() {
-    const match = location.pathname.match(/^\/(release|release-group)\/([0-9a-f-]{36})/);
+    const match = currentPath().match(/^\/(release|release-group)\/([0-9a-f-]{36})/);
     const header = document.querySelector(".releaseheader, .rgheader");
     const anchor = header?.querySelector("h1");
     if (!match || !anchor) return null;
@@ -2561,7 +3005,7 @@
   }
 
   function parseYoutube() {
-    const video = location.pathname === "/watch" ? new URLSearchParams(location.search).get("v") : null;
+    const video = currentPath() === "/watch" ? new URLSearchParams(location.search).get("v") : null;
     const flexy = document.querySelector("ytd-watch-flexy");
     const anchor = document.querySelector("ytd-watch-metadata #title");
     const title = anchor?.querySelector("h1")?.textContent.trim();
@@ -2581,6 +3025,10 @@
     { host: /(^|\.)musicbrainz\.org$/, kind: "music", parse: parseMusicBrainz, scan: scanMusicBrainz },
     { host: /^the-(?:fork|drop-reviews)\.vercel\.app$/, kind: "music", parse: parseFork, scan: scanFork, spa: true },
     { host: /^www\.youtube\.com$/, kind: "videos", parse: parseYoutube, scan: scanYoutube, spa: true },
+    { host: /^(?:open|xpui\.app)\.spotify\.com$/, kind: "music", parse: parseSpotify, scan: scanSpotify, spa: true },
+    { origin: (s) => s.deemixUrl, kind: "music", parse: parseDeemix, scan: scanDeemix, spa: true },
+    { origin: (s) => s.tidarrUrl, kind: "music", parse: parseTidarr, scan: scanTidarr, spa: true },
+    { origin: (s) => s.spicetifyLibraryUrl, kind: "music", parse: () => null, scan: scanSpicetifyLibrary, spa: true },
   ];
   const PAGE_RUNNERS = { music: runAlbumPage, films: runFilmPage, videos: runVideoPage };
 
@@ -2595,63 +3043,85 @@
       scanStarted = true;
       startMarkers(s, site.kind, site.scan);
     }
-    return !!page;
+    return page;
   }
 
+  // What a page's badges are for, to tell when the page now shows something else.
+  function pageKey(page) {
+    return page ? JSON.stringify([page.title, page.artists, page.video, page.tmdb, page.slug]) : "";
+  }
+
+  // A site that switches pages without a reload can show the previous item for a moment after its address changes,
+  // or update the item in place, so the badges are redone whenever what the page shows no longer matches them.
   function watchSpa(s, site) {
-    let url = location.href;
-    let done = runSite(s, site);
+    let url = currentHref();
+    let shown = pageKey(runSite(s, site));
     let timer = null;
     const schedule = () => {
       if (timer || document.hidden) return;
       timer = setTimeout(() => {
         timer = null;
-        if (location.href !== url) {
-          url = location.href;
-          document.getElementById("library-badges")?.remove();
-          done = false;
-        } else if (done && !document.getElementById("library-badges")) {
-          done = false;
+        if (currentHref() !== url) {
+          url = currentHref();
+          shown = "";
+        } else if (shown && (!document.getElementById("library-badges") || pageKey(site.parse()) !== shown)) {
+          shown = "";
         }
-        if (!done) done = runSite(s, site);
+        if (!shown) {
+          document.getElementById("library-badges")?.remove();
+          shown = pageKey(runSite(s, site));
+        }
       }, 300);
     };
     new MutationObserver(schedule).observe(document.body, { childList: true, subtree: true });
     document.addEventListener("visibilitychange", schedule);
   }
 
+  function notify(message) {
+    if (IN_SPOTIFY) Spicetify.showNotification(message);
+    else alert(message);
+  }
+
   // Copies every setting (including passwords and tokens) to the clipboard, or reads them back, to set up another browser.
+  // Spotify's app has no prompt dialog, so there import reads the clipboard directly.
   async function exportSettings() {
     const text = JSON.stringify(getSettings());
     try {
-      await navigator.clipboard.writeText(text);
-      alert("Library Badges settings copied to the clipboard. They include your passwords and tokens.");
+      await (IN_SPOTIFY && Spicetify.Platform?.ClipboardAPI ? Spicetify.Platform.ClipboardAPI.copy(text) : navigator.clipboard.writeText(text));
+      notify("Library Badges settings copied to the clipboard. They include your passwords and tokens.");
     } catch {
-      prompt("Copy your Library Badges settings (they include your passwords and tokens):", text);
+      if (IN_SPOTIFY) notify("Couldn't copy the Library Badges settings to the clipboard.");
+      else prompt("Copy your Library Badges settings (they include your passwords and tokens):", text);
     }
   }
 
-  function importSettings() {
-    const text = prompt("Paste exported Library Badges settings:");
-    if (!text) return;
+  // Spotify's app refuses the browser's clipboard read, so there it goes through Spotify's own clipboard API. Settings
+  // with no server addresses (an export of a fresh install) are refused rather than wiping the setup.
+  async function importSettings() {
+    const paste = () => (Spicetify.Platform?.ClipboardAPI ? Spicetify.Platform.ClipboardAPI.paste() : navigator.clipboard.readText());
+    const text = IN_SPOTIFY ? await Promise.resolve().then(paste).catch(() => "") : prompt("Paste exported Library Badges settings:");
+    if (!text) return IN_SPOTIFY && notify("Copy exported Library Badges settings first, then choose Import settings.");
     try {
       const raw = JSON.parse(text);
       if (!raw || typeof raw !== "object" || !SETTING_KEYS.some((key) => key in raw)) throw new Error("Not settings");
       const values = normalizeSettings(raw);
-      for (const key of SETTING_KEYS) GM_setValue(key, values[key]);
+      if (!URL_KEYS.some((key) => values[key])) return notify("Those settings have no server addresses. Export them from the browser where Library Badges is set up, then import again.");
+      await Promise.all(SETTING_KEYS.map((key) => gm.set(key, values[key])));
       location.reload();
     } catch {
-      alert("Those aren't Library Badges settings.");
+      notify(IN_SPOTIFY ? "The clipboard doesn't hold Library Badges settings. Export them first, then choose Import settings." : "Those aren't Library Badges settings.");
     }
   }
 
-  GM_registerMenuCommand("Settings", openSettings);
-  GM_registerMenuCommand("Refresh library index", clearIndexes);
-  GM_registerMenuCommand("Export settings", exportSettings);
-  GM_registerMenuCommand("Import settings", importSettings);
-  if (document.getElementById("library-badges")) return;
-  const settings = getSettings();
-  const site = SITES.find((entry) => entry.host.test(location.hostname));
-  if (site?.spa) watchSpa(settings, site);
-  else if (site) runSite(settings, site);
+  gm.ready().then(() => {
+    gm.menu("Settings", openSettings);
+    gm.menu("Refresh library index", clearIndexes);
+    gm.menu("Export settings", exportSettings);
+    gm.menu("Import settings", importSettings);
+    if (document.getElementById("library-badges")) return;
+    const settings = getSettings();
+    const site = SITES.find((entry) => (entry.host ? entry.host.test(location.hostname) : isCurrentOrigin(entry.origin(settings))));
+    if (site?.spa) watchSpa(settings, site);
+    else if (site) runSite(settings, site);
+  });
 })();

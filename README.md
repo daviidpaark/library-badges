@@ -1,6 +1,6 @@
 # Library Badges
 
-A userscript that shows, while you browse music sites, Letterboxd and YouTube, whether you already have an album, film or video in your self-hosted libraries, and gets you to it or to a download in one click.
+A userscript (and [Spotify desktop extension](#spotify-desktop-app)) that shows, while you browse music sites, Spotify, Letterboxd and YouTube, whether you already have an album, film or video in your self-hosted libraries, and gets you to it or to a download in one click.
 
 - **Item pages** (an album, film or video) get a row of badges under the title: one per library, with details such as quality or watched state.
 - **List pages** (charts, discographies, filmographies, watchlists, feeds, search results) mark every item: library icons for what you have, the Radarr or Sonarr icon for what's on its way, and a ↓ download button for what you're missing.
@@ -16,15 +16,31 @@ Libraries: Navidrome, Plex, Jellyfin, Spotify (through [spicetify-library](https
 4. Fill in the services you use and press **Test** next to each one. **Save** reloads the page.
 5. The first request to each server asks you to allow the domain. Choose **Always allow domain**.
 
+### Spotify desktop app
+
+The same file also works as a [Spicetify](https://spicetify.app/) extension, with the same badges on album pages, cards and Your Library inside Spotify's desktop app, and on the album cards of the [Random Library](https://github.com/daviidpaark/random-library) and [Release List](https://github.com/daviidpaark/release-list) apps.
+
+1. Copy `library-badges.user.js` to the `Extensions` folder inside `spicetify path userdata`, named `library-badges.js`.
+2. Run `spicetify config extensions library-badges.js`, then `spicetify apply`.
+3. Bring your settings over: **Export settings** in the browser, then in Spotify's profile menu **Library Badges → Import settings** (it reads the clipboard).
+
+Servers need **https** addresses inside Spotify; a plain `http://` one (such as Plex on `http://server:32400`) shows an error badge. To update, copy the new file over the old one and run `spicetify apply` again.
+
 ## Supported sites
 
 | Media | Sites | Matched by |
 | --- | --- | --- |
-| Albums | RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, [The Fork](https://the-fork.vercel.app/), [The Drop](https://the-drop-reviews.vercel.app/) | Spotify album ID (RateYourMusic), MusicBrainz ID (MusicBrainz), otherwise artist and title |
+| Albums | RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify's web player, [The Fork](https://the-fork.vercel.app/), [The Drop](https://the-drop-reviews.vercel.app/) | Spotify album ID (RateYourMusic, Spotify), MusicBrainz ID (MusicBrainz), otherwise artist and title |
 | Films and shows | Letterboxd | TMDB ID on film pages; title and year on lists, with a match one year off confirmed against the film's TMDB ID |
 | YouTube videos | YouTube | Video ID (see [YouTube libraries](#youtube-libraries)) |
 
 Every site gets badges on its item pages and icons on its list pages. Each album is marked once: Discogs' expanded versions and version tables are left alone, and RateYourMusic's Issues lists and MusicBrainz release groups only mark the digital version closest to each library's copy (the same title, then the same edition wording, then the first listed, which on RateYourMusic is the primary issue). On MusicBrainz, a copy tagged with a release ID marks that exact release, whatever its format. The Fork and The Drop have no album pages, so their review dialog gets the badges.
+
+### Deemix, Tidarr and Spicetify Library
+
+Your own Deemix and Tidarr get badges too, so you can see what you already have before downloading it: album pages get the library badges, and search results, artist pages and Deemix's charts and favorites mark each album. Download links there leave out the downloader you're on. [Spicetify Library](https://github.com/daviidpaark/spicetify-library) marks the albums in its library, Discover and Release List tabs, matched by Spotify album ID.
+
+Their addresses are your own, so the script can't list them. Add them once: in Violentmonkey, open the script, go to its **Settings** tab and add them to the custom **@match** rules (Tampermonkey: **Settings → User matches**), one line per server, for example `http://192.168.1.100:6595/*` and `http://192.168.1.100:8484/*`. Add Spicetify Library's read-only address the same way. They must match the Deemix, Tidarr and Spicetify Library URLs in Library Badges' settings, and they're kept when the script updates.
 
 ## Item pages
 
@@ -33,6 +49,7 @@ Each configured library gets a badge under the title:
 | Badge | Meaning |
 | --- | --- |
 | **✓** green outline | In that library. Click to open it in its player. |
+| **?** amber, dashed | Navidrome only. Not sure: Navidrome probably has it under another credit or title (see [Not sure](#not-sure)). Click to open that album and check. |
 | **✕** grey | Not found. Click to search that library, in case it's there under another name. The Spotify badge opens the album on Spotify when the page links it. |
 | **↗** dashed outline | A link to download, add or buy it (see below). |
 | **!** red outline | The server couldn't be reached or refused the request. Hover for the reason. |
@@ -42,12 +59,11 @@ Owned items add details to their badge:
 - **Films:** quality, size, whether you've watched it, and for a foreign-language film its audio language and whether English subtitles are there, for example "1080p · 11.3 GB · Japanese audio · EN subs · watched". On Letterboxd, with your username set, a film you've watched but haven't logged is noted as "not logged on Letterboxd".
 - **Shows:** the seasons and episodes you have.
 
-Download and request links:
+Download and request links show whether or not you have the item, so every service is a click away:
 
-- **Albums missing from Navidrome** link to Deemix and Tidarr (straight to the album when the page links it on Deezer or Tidal, otherwise to a search), to slskd's search page and, when turned on, to a Bandcamp search where you can buy it.
-- **Films missing from every library** link to Radarr's movie or add page. With an API key the badge shows Radarr's state, such as "Not added", "Monitored, missing" or "Downloading 43%".
-- **Films you only have in 720p or SD** link to Radarr to look for a better copy ("upgrade from 720p").
-- **Shows** always link to Sonarr, which says how complete the show is ("Complete, 62 episodes" or "50/62 episodes, 12 missing").
+- **Albums** link to Deemix and Tidarr (straight to the album when the page links it on Deezer or Tidal, otherwise to a search), to slskd's search page and, when turned on, to a Bandcamp search where you can buy it.
+- **Films** link to Radarr's movie or add page. With an API key the badge shows Radarr's state, such as "Downloaded (Bluray-1080p)", "Not added", "Monitored, missing" or "Downloading 43%". A film you only have in 720p or SD adds "upgrade from 720p".
+- **Shows** link to Sonarr, which says how complete the show is ("Complete, 62 episodes" or "50/62 episodes, 12 missing").
 
 ## List pages
 
@@ -59,13 +75,16 @@ Every item on a list page gets one of three marks, in the corner of its cover or
 | Radarr or Sonarr icon, dashed | Not in your library yet, but Radarr or Sonarr has it, so it's on its way. Dimmed when it isn't monitored. Needs the service's API key. |
 | **↓**, dashed | Missing. Opens it in your default downloader; **▾** next to it lists the others. Albums use Deemix, Tidarr, slskd or Bandcamp, films Radarr, shows Sonarr. Letterboxd posters offer both Radarr and Sonarr, since they don't say which an item is. |
 
-Albums you have elsewhere but not in Navidrome, where downloads land, get both their library icons and the ↓.
+Albums you have elsewhere but not in Navidrome, where downloads land, get both their library icons and the ↓. An album Navidrome probably has under another credit or title gets an amber **?** with the Navidrome icon (in front of the ↓); click it to open that album and check. The counter lists these under **Not sure**.
 
-The **counter** in the bottom-right corner shows how many items on the page you have and how many are on the way (items Radarr or Sonarr has but doesn't monitor count as missing). On a Letterboxd director's, actor's or list page, that's how complete it is in your library. Click it to list the page's items, grouped as in your library, on the way and missing:
+The **counter** in the bottom-right corner shows how many items on the page you have and how many are on the way (items Radarr or Sonarr has but doesn't monitor count as missing). An album counts as yours once it's in Navidrome, where downloads land; one you only have elsewhere counts as missing, with its library icons in the list. Films, shows and videos count when any library has them. On a Letterboxd director's, actor's or list page, that's how complete it is in your library. Click it to list the page's items, grouped as in your library, on the way and missing:
 
-- Filter to one group with the buttons at the top.
-- **Copy missing** copies what you still need, one per line as the page names it (for example "Artist – Album" or "Title (Year)"), for pasting into a search.
-- Click a name to scroll to it on the page.
+- **Search** narrows the list to names containing what you type.
+- The **library menu** shows only items in, or not in, one library (for example "Not in Navidrome" for what to download), or on film pages what you have or haven't watched.
+- Sort by **page order** or **A–Z**.
+- The buttons under the search show one group, with counts that follow the search and menu.
+- **Copy list** copies exactly what's shown, one per line as the page names it (for example "Artist – Album" or "Title (Year)"), for pasting into a search.
+- Click a name to scroll to it on the page; it flashes an outline so it's easy to spot.
 
 ## Settings
 
@@ -76,7 +95,7 @@ The **counter** in the bottom-right corner shows how many items on the page you 
 | Jellyfin | Server URL, API key, optional username | Create a key in **Dashboard → API Keys**. Watched state is read for that user, or the first administrator. |
 | Spotify | Spicetify Library URL | The read-only address of [spicetify-library](https://github.com/daviidpaark/spicetify-library). |
 | Radarr, Sonarr | URL, optional API key | The key adds each film's or show's state, and the "on its way" icons on list pages. |
-| Deemix, Tidarr, slskd | URL | Only linked to. |
+| Deemix, Tidarr, slskd | URL | Linked to. Deemix and Tidarr also get badges once you add their addresses to the script's matches (see [Deemix, Tidarr and Spicetify Library](#deemix-tidarr-and-spicetify-library)). |
 | Bandcamp | On or off | Adds a Bandcamp search to albums missing from Navidrome. |
 | Letterboxd | Username | Notes watched films you haven't logged. |
 | Display | Film details, icons on lists, ↓ on missing items, default album downloader, page counter, covers you have | Hide what you don't need, choose which downloader the ↓ opens first, and optionally dim the covers of items you have so new things stand out (hover to see them). |
@@ -108,11 +127,23 @@ Titles are compared without the wording that varies between editions and service
 - soundtrack wording such as "(Original Game Soundtrack)", "(Original Music For The Film By …)" or a trailing "Soundtrack", and "(feat. …)" suffixes;
 - full-width characters;
 - a leading artist name ("Gingerbee at Thalia Hall" matches "At Thalia Hall");
-- "Live at" wording in a subtitle ("A Night at the Symphony: Live at the Hollywood Bowl" matches "…: Hollywood Bowl").
+- "Live at" wording in a subtitle or at the start ("A Night at the Symphony: Live at the Hollywood Bowl" matches "…: Hollywood Bowl", "Dua Lipa - Live from the Royal Albert Hall" matches "Live from the Royal Albert Hall");
+- "(Original Soundtrack Album)", a trailing "Original Motion Picture Score", "(OST from …)" and "(DJ Mix)", and "Pt. 2" read as "2".
 
 Artists named differently from the library still match the same title: a full name finds the library's shorter one ("Stella Katherine Cole" finds "Stella Cole", "Samia Finnerty" finds "Samia"), a family name written first finds the usual order ("Aoba Ichiko" finds "Ichiko Aoba"), a library name with a disambiguation suffix is found without it ("Ugly" finds "Ugly (UK)"), and a compilation credited to "Various" finds the one album in your library with that title. A release that combines two ("Towards The End / Where To Find Me", "Folklore I & II") counts when you have either part, and a title also finds a longer library title by the same artist that ends with it ("Louder, Please" finds "A Little Louder, Please").
 
-When no title matches exactly, an album by the same artist whose title continues the page's title counts too, so "BRAT" finds "Brat and it's completely different but also still brat". A separate remix, instrumental, a cappella, live, demo or numbered album ("Mordechai Remixes", "Led Zeppelin IV") never stands in for the original.
+When no title matches exactly, an album by the same artist whose title continues the page's title counts too, so "BRAT" finds "Brat and it's completely different but also still brat". A separate remix, instrumental, a cappella, live, demo or numbered album ("Mordechai Remixes", "YOU ASKED! (Instrumental Album)", "Led Zeppelin IV", "Shin Megami Tensei V") never stands in for the original.
+
+An album matched by its Spotify or MusicBrainz ID also gets the artist and title match, so a Navidrome copy the index didn't group with it still counts.
+
+### Not sure
+
+Some albums can't be confirmed but are probably in Navidrome, so they're marked **?** rather than missing:
+
+- the same title credited to someone else, when the title is distinctive (12 or more letters and digits) and only one Navidrome album has it. Spotify often credits a label, composer or band ("ATLUS Sound Team", "Gustav Mahler", "Bill Evans Trio") where your tags have "ATLUS GAME MUSIC", an orchestra or "Bill Evans";
+- a Navidrome album by the same artist whose title the page's title only adds words to ("Vanities" for "Vanities (Extended)"), or that adds a remix, instrumental or numbered part ("Illmatic XX" for "Illmatic").
+
+Album pages show the Navidrome badge as **?** for these, linking to the album it probably is.
 
 ### YouTube libraries
 

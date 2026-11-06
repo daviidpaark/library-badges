@@ -5,6 +5,30 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.6] - 2026-11-06
+
+### Added
+- **Spotify:** The web player's album pages show the library badges under the play button row, and album cards in search, home, artist and album pages and Your Library are marked, matched by Spotify album ID, then artist and title. Your Library's list view, with its small covers, shows the icons in a two-by-two grid.
+- **Deemix and Tidarr:** Your own Deemix and Tidarr show the library badges on album pages and mark albums in search results, artist pages and Deemix's charts and favorites, so you can see what you have before downloading it. Download links there leave out the downloader you're on.
+- **Spicetify Library:** Its library, Discover and Release List tabs mark each album, matched by Spotify album ID.
+- **Page Counter:** The list has a search box, a menu to show items in or not in one library (or watched and not watched), and A–Z sorting. **Copy list** replaces Copy missing and copies exactly what's shown.
+- **Page Counter:** Clicking a name flashes an outline around the item after scrolling to it.
+- **Not Sure:** Albums Navidrome probably has under another credit or title (the same distinctive title credited to someone else, or a title by the same artist with words added) get an amber **?** linking to that Navidrome album instead of counting as missing. The counter lists them under Not sure, and album pages show the Navidrome badge as **?**.
+- **Spotify Desktop App:** The same file runs as a Spicetify extension, with the Spotify web player's badges on album pages, cards and Your Library inside Spotify's desktop app. Its commands are in a Library Badges submenu of the profile menu, settings import from the clipboard, and servers have to be reachable over https; see the README.
+- **Spotify Desktop App:** The Random Library and Release List apps mark their album cards, matched by Spotify album ID (by artist and title with versions of the apps from before this).
+- Deemix, Tidarr and Spicetify Library need their addresses added to the script's custom matches once; see the README.
+
+### Changed
+- **Page Counter:** An album counts as in your library only once it's in Navidrome, where downloads land, as the ↓ already did; albums only in Plex, Jellyfin or Spotify count as missing. Dimmed covers follow the same rule.
+
+### Fixed
+- **Bandcamp:** In your own collection, private albums get their icons too, and Bandcamp's download checkbox moves to the cover's bottom-left corner so the icons keep the top-left.
+- **Album Matching:** An album matched by its Spotify or MusicBrainz ID also gets the artist and title match, so a Navidrome copy credited or titled differently still counts (Spotify pages, Your Library, RateYourMusic, MusicBrainz and album pages).
+- **Album Matching:** Titles match across "(Original Soundtrack Album)", a trailing "Original Motion Picture Score", "(OST from …)", "(DJ Mix)", "Pt. 2" and "2", a bracket with no space before it, and a leading "Artist - Live from …". A title that continues with a number ("Shin Megami Tensei V") or an instrumental album no longer stands in for the original.
+- **Album Pages:** Going from one album straight to another on Spotify (and other sites that switch pages without reloading) shows the new album's badges, instead of none or the previous album's until you navigate away or reload.
+- **Spotify:** The album you have open is marked in Your Library too, so it has its badge as soon as the app starts on it.
+- **Spotify:** Cards that show a status instead of the artist ("Album added") are still marked, by their Spotify album ID, and Your Library subtitles with a label in front ("Upcoming album", "New release") give their artist.
+
 ## [0.1.5] - 2026-11-05
 
 ### Fixed
