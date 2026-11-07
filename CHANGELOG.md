@@ -5,6 +5,12 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-11-06
+
+### Security
+- **Navidrome:** Requests use Subsonic token authentication (a salted hash) instead of putting the password in the URL, so it no longer shows up in Navidrome or reverse proxy logs.
+- **Settings:** Saved passwords, tokens and API keys are no longer filled back into the settings form, where scripts on the page could read them; leave a field blank to keep what's saved. The form is in a closed shadow root.
+
 ## [0.1.6] - 2026-11-06
 
 ### Added

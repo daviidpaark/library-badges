@@ -101,7 +101,7 @@ The **counter** in the bottom-right corner shows how many items on the page you 
 | Letterboxd | Username | Notes watched films you haven't logged. |
 | Display | Film details, icons on lists, ↓ on missing items, default album downloader, page counter, covers you have | Hide what you don't need, choose which downloader the ↓ opens first, and optionally dim the covers of items you have so new things stand out (hover to see them). |
 
-Leave a service empty to turn it off. Settings, including passwords and tokens, stay in the userscript manager's storage (in Spotify's desktop app, the app's own storage) and are only sent to the server they belong to. Use addresses your browser can reach wherever you use it.
+Leave a service empty to turn it off. Saved passwords, tokens and API keys show as blank in the form; leave them blank to keep them. Settings, including passwords and tokens, stay in the userscript manager's storage (in Spotify's desktop app, the app's own storage) and are only sent to the server they belong to. Use addresses your browser can reach wherever you use it.
 
 You can use download or request links without configuring a library; ownership badges require a configured library.
 

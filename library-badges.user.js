@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.6
+// @version      0.1.7
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -29,7 +29,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.6";
+  const VERSION = "0.1.7";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
   const INDEX_VERSION = 18;
@@ -315,7 +315,8 @@
     if (document.getElementById("library-badges-settings")) return;
     const host = document.createElement("div");
     host.id = "library-badges-settings";
-    const shadow = host.attachShadow({ mode: "open" });
+    // Closed, so the page cannot reach into the form
+    const shadow = host.attachShadow({ mode: "closed" });
     const style = document.createElement("style");
     style.textContent = SETTINGS_STYLE;
     const form = document.createElement("form");
@@ -327,6 +328,8 @@
     const body = form.querySelector(".body");
     const inputs = {};
     const saved = getSettings();
+    const formValues = () =>
+      Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.type === "password" && !input.value ? saved[key] : input.value]));
 
     for (const group of SETTINGS_FORM) {
       const section = document.createElement("section");
@@ -359,8 +362,10 @@
         } else {
           input = document.createElement("input");
           input.type = type;
-          input.value = saved[key];
-          input.placeholder = extra || "";
+          // Saved secrets are never put back into the page; a blank field keeps them
+          const keepSecret = type === "password" && saved[key];
+          input.value = keepSecret ? "" : saved[key];
+          input.placeholder = keepSecret ? "Saved (leave blank to keep)" : extra || "";
           input.autocomplete = "off";
           input.spellcheck = false;
         }
@@ -371,7 +376,7 @@
       }
 
       test.addEventListener("click", async () => {
-        const s = normalizeSettings(Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value])));
+        const s = normalizeSettings(formValues());
         status.className = "status";
         if (!server.configured(s)) {
           status.textContent = "Fill in the required fields first";
@@ -403,8 +408,12 @@
       body.replaceChildren(...(showing ? sections : [libraryGaps()]));
       gapsButton.textContent = showing ? "Library gaps" : "Settings";
     });
-    host.addEventListener("click", (event) => {
-      if (event.composedPath()[0] === host) close();
+    // The shadow root is closed, so the host cannot see which element was clicked; the form flags its own clicks
+    let clickedForm = false;
+    form.addEventListener("click", () => (clickedForm = true));
+    host.addEventListener("click", () => {
+      if (!clickedForm) close();
+      clickedForm = false;
     });
     for (const type of ["keydown", "keyup", "keypress"]) {
       host.addEventListener(type, (event) => {
@@ -414,13 +423,13 @@
     }
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const values = normalizeSettings(Object.fromEntries(Object.entries(inputs).map(([key, input]) => [key, input.value])));
+      const values = normalizeSettings(formValues());
       Promise.all(SETTING_KEYS.map((key) => gm.set(key, values[key]))).then(() => location.reload());
     });
 
     shadow.append(style, form);
     document.documentElement.append(host);
-    (Object.values(inputs).find((input) => !input.value) || inputs.navidromeUrl).focus();
+    (Object.values(inputs).find((input) => !input.value && !input.placeholder.startsWith("Saved")) || inputs.navidromeUrl).focus();
   }
 
   // Lists what each library is missing compared with the others, from the cached indexes.
@@ -562,12 +571,40 @@
   // ---------------------------------------------------------------------------
   // Library servers
   // ---------------------------------------------------------------------------
+  // MD5 of a string's UTF-8 bytes, for Subsonic token auth (Web Crypto has no MD5).
+  function md5Hex(text) {
+    const bytes = new TextEncoder().encode(text);
+    const words = new Uint32Array(((bytes.length + 8) >> 6) * 16 + 16);
+    bytes.forEach((byte, i) => (words[i >> 2] |= byte << ((i % 4) * 8)));
+    words[bytes.length >> 2] |= 0x80 << ((bytes.length % 4) * 8);
+    words[words.length - 2] = bytes.length * 8;
+    words[words.length - 1] = Math.floor(bytes.length / 0x20000000);
+    const shifts = [7, 12, 17, 22, 5, 9, 14, 20, 4, 11, 16, 23, 6, 10, 15, 21];
+    const k = Array.from({ length: 64 }, (_, i) => Math.floor(Math.abs(Math.sin(i + 1)) * 2 ** 32) >>> 0);
+    let [a0, b0, c0, d0] = [0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476];
+    for (let block = 0; block < words.length; block += 16) {
+      let [a, b, c, d] = [a0, b0, c0, d0];
+      for (let i = 0; i < 64; i++) {
+        const round = i >> 4;
+        const f = round === 0 ? (b & c) | (~b & d) : round === 1 ? (d & b) | (~d & c) : round === 2 ? b ^ c ^ d : c ^ (b | ~d);
+        const g = round === 0 ? i : round === 1 ? (5 * i + 1) % 16 : round === 2 ? (3 * i + 5) % 16 : (7 * i) % 16;
+        const sum = (a + f + k[i] + words[block + g]) | 0;
+        const shift = shifts[round * 4 + (i % 4)];
+        [a, d, c] = [d, c, b];
+        b = (b + ((sum << shift) | (sum >>> (32 - shift)))) | 0;
+      }
+      [a0, b0, c0, d0] = [(a0 + a) | 0, (b0 + b) | 0, (c0 + c) | 0, (d0 + d) | 0];
+    }
+    return [a0, b0, c0, d0].map((n) => [0, 8, 16, 24].map((bit) => ((n >>> bit) & 0xff).toString(16).padStart(2, "0")).join("")).join("");
+  }
+
   const navidrome = {
     configured: (s) => s.navidromeUrl && s.navidromeUser && s.navidromePassword,
     async call(s, method, params) {
-      const password = [...new TextEncoder().encode(s.navidromePassword)].map((b) => b.toString(16).padStart(2, "0")).join("");
-      const query = new URLSearchParams({ u: s.navidromeUser, v: "1.16.1", c: "library-badges", f: "json", ...params });
-      const data = await request(`${s.navidromeUrl}/rest/${method}?${query}&p=enc:${password}`);
+      // Token auth, so the password itself never appears in a URL or a server log
+      const salt = [...crypto.getRandomValues(new Uint8Array(8))].map((b) => b.toString(16).padStart(2, "0")).join("");
+      const query = new URLSearchParams({ u: s.navidromeUser, t: md5Hex(s.navidromePassword + salt), s: salt, v: "1.16.1", c: "library-badges", f: "json", ...params });
+      const data = await request(`${s.navidromeUrl}/rest/${method}?${query}`);
       const body = data?.["subsonic-response"];
       if (!body || body.status !== "ok") throw new Error(body?.error?.message || `Navidrome ${method} failed`);
       return body;
