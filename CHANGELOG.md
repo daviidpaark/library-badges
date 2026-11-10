@@ -5,6 +5,14 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-11-10
+
+### Added
+- **Spotify Desktop App:** Install and uninstall scripts for Windows (PowerShell) and macOS and Linux, like the Random Library and Release List apps; see the README.
+
+### Fixed
+- **Spotify Desktop App:** Libraries on servers that don't allow Spotify's origin, such as Jellyfin and Spicetify Library, no longer leave the library index stuck unbuilt (and the badges missing) when Spotify starts; the extension now waits for Spotify's request bridge before it runs.
+
 ## [0.1.7] - 2026-11-06
 
 ### Security

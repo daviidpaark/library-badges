@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.7
+// @version      0.1.8
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -29,7 +29,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.7";
+  const VERSION = "0.1.8";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
   const INDEX_VERSION = 18;
@@ -85,7 +85,7 @@
           .catch((error) => {
             if (error.name === "TimeoutError") return ontimeout();
             if (url.startsWith("http:")) return onerror(`Spotify's app only reaches https addresses, not ${new URL(url).host}`);
-            Spicetify.CosmosAsync.get(url, null, headers).then((body) => {
+            Promise.resolve().then(() => Spicetify.CosmosAsync.get(url, null, headers)).then((body) => {
               const failed = body && typeof body === "object" && typeof body.code === "number" && "error" in body && "message" in body;
               if (!failed) return onload({ status: 200, responseText: typeof body === "string" ? body : JSON.stringify(body) });
               if (body.code === 404) return onload({ status: 404, responseText: "" });
@@ -113,7 +113,7 @@
         menuTimer = setTimeout(registerMenu, 0);
       },
       async ready() {
-        while (!Spicetify.Menu || !document.body) await new Promise((resolve) => setTimeout(resolve, 100));
+        while (!Spicetify.Menu || !Spicetify.CosmosAsync || !document.body) await new Promise((resolve) => setTimeout(resolve, 100));
         db = await openDb().catch(() => null);
         if (db) await loadValues();
       },

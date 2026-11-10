@@ -20,11 +20,37 @@ Libraries: Navidrome, Plex, Jellyfin, Spotify (through [spicetify-library](https
 
 The same file also works as a [Spicetify](https://spicetify.app/) extension, with the same badges on album pages, cards and Your Library inside Spotify's desktop app, and on the album cards of the [Random Library](https://github.com/daviidpaark/random-library) and [Release List](https://github.com/daviidpaark/release-list) apps.
 
-1. Copy `library-badges.user.js` to the `Extensions` folder inside `spicetify path userdata`, named `library-badges.js`.
-2. Run `spicetify config extensions library-badges.js`, then `spicetify apply`.
-3. Bring your settings over: **Export settings** in the browser, then in Spotify's profile menu **Library Badges → Import settings** (it reads the clipboard).
+With [Spicetify](https://spicetify.app/) installed (`spicetify backup` run at least once), run the installer:
 
-Servers need **https** addresses inside Spotify; a plain `http://` one (such as Plex on `http://server:32400`) shows an error badge. To update, copy the new file over the old one and run `spicetify apply` again.
+**Windows (PowerShell)**
+
+```powershell
+iwr -useb "https://raw.githubusercontent.com/daviidpaark/library-badges/main/install.ps1" | iex
+```
+
+**macOS / Linux**
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/daviidpaark/library-badges/main/install.sh" | bash
+```
+
+It downloads `library-badges.user.js` into Spicetify's `Extensions` folder as `library-badges.js`, registers it in `config-xpui.ini` and runs `spicetify apply`. Restart Spotify if it was already open, then bring your settings over: **Export settings** in the browser, then in Spotify's profile menu **Library Badges → Import settings** (it reads the clipboard).
+
+Servers need **https** addresses inside Spotify; a plain `http://` one (such as Plex on `http://server:32400`) shows an error badge. To update, run the installer again.
+
+To uninstall:
+
+**Windows (PowerShell)**
+
+```powershell
+iwr -useb "https://raw.githubusercontent.com/daviidpaark/library-badges/main/uninstall.ps1" | iex
+```
+
+**macOS / Linux**
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/daviidpaark/library-badges/main/uninstall.sh" | bash
+```
 
 ### Your Deemix, Tidarr and Spicetify Library
 
