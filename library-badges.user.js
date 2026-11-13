@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.8
+// @version      0.1.9
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -29,10 +29,10 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.8";
+  const VERSION = "0.1.9";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
-  const INDEX_VERSION = 18;
+  const INDEX_VERSION = 19;
   const FRESHNESS_CHECK = 15 * 60 * 1000;
 
   // The same file runs as a Spicetify extension inside Spotify's desktop app, where there's no userscript manager:
@@ -1115,7 +1115,7 @@
           title: music ? matchKey(normalizeTitle(item.title)) : "",
           name: music ? normalizeTitle(item.title, true) : "",
           original: music ? item.title : "",
-          release: (music && item.releaseId) || "",
+          release: (music && code !== "p" && item.releaseId) || "",
           artists: music ? [...new Set(artistVariants(item).map(matchKey))] : [],
           label: recordLabel(kind, item),
           watched: !!item.watched,
@@ -1782,11 +1782,15 @@
     return issues.find((issue) => matchKey(issue.title) === matchKey(title)) || issues.find((issue) => editionOf(issue.edition) === editionOf(title)) || issues[0];
   }
 
+  // Plex's MusicBrainz ID is its own metadata match (often the first CD release), not the file's tag, so an untagged
+  // Plex copy sits with the release its Navidrome or Jellyfin copy is tagged with.
   function markVersions(group, albumTitle, versions, hrefs) {
     const digital = versions.filter((version) => version.digital);
+    const taggedVersion = (code) => group.r?.[code] && versions.find((version) => version.id === group.r[code]);
+    const localTag = taggedVersion("n") || taggedVersion("j");
     const marks = new Map();
     for (const [code, id] of Object.entries(orderedOwned(group, "music") || {})) {
-      const tagged = group.r?.[code] && versions.find((version) => version.id === group.r[code]);
+      const tagged = taggedVersion(code) || (code === "p" && localTag);
       const version = tagged || closestIssue(digital, group.v?.[code] || albumTitle);
       if (!version) continue;
       const mark = marks.get(version) || { owned: {}, how: "closest digital release" };

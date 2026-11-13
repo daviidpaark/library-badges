@@ -5,6 +5,11 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-11-13
+
+### Fixed
+- **MusicBrainz:** On a release group page, the Plex badge no longer lands on a release you don't have (often the CD) because of the release Plex's own metadata matched; it now sits on the release your Navidrome or Jellyfin copy is tagged with, or the closest digital release.
+
 ## [0.1.8] - 2026-11-10
 
 ### Added
