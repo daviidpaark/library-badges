@@ -5,6 +5,12 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-11-14
+
+### Fixed
+- **Discogs:** Releases with no cover art now get their badges on the placeholder cover instead of under the title, in search results and collections.
+- **Discogs:** Items whose artist or release another userscript links to MusicBrainz are marked again; those added links were read as the artist or as a second release.
+
 ## [0.1.9] - 2026-11-13
 
 ### Fixed

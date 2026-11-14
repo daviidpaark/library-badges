@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.9
+// @version      0.1.10
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -29,7 +29,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.9";
+  const VERSION = "0.1.10";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
   const INDEX_VERSION = 19;
@@ -1926,13 +1926,13 @@
   }
 
   // Marks one link: in the corner when it wraps (or overlays) a cover or poster, otherwise right after the link text.
-  function placeMarker(link, owned, hrefs, how, poster = link.querySelector("img") ? link : null, note = null) {
+  function placeMarker(link, owned, hrefs, how, poster = coverOf(link) ? link : null, note = null) {
     attachMarker(link, createMarker(owned, hrefs, how, !!poster, note), poster);
     if (poster && tally.settings?.displayDim === "on" && inLibrary(owned)) poster.classList.add("lbm-dimmed");
   }
 
   // A possible Navidrome match goes in front of the ↓, so a cover holds at most two markers.
-  function placeGet(link, download, poster = link.querySelector("img") ? link : null) {
+  function placeGet(link, download, poster = coverOf(link) ? link : null) {
     if (download?.arr) return attachMarker(link, createArrMarker(download.arr, !!poster), poster);
     const links = download ? downloadLinks(tally.settings, download) : [];
     if (links.length) {
@@ -2176,12 +2176,14 @@
     },
     (index, link, key, label) => {
       const pageArtist = /^\/(?:[a-z]{2}\/)?artist\//.test(currentPath()) ? document.querySelector("h1")?.textContent : "";
-      // The artist comes from the item's own card; a link outside any card (Discogs' "Random Item") is skipped.
+      // The artist comes from the item's own card; a link outside any card (Discogs' "Random Item") is skipped. Only
+      // Discogs' own links count, since other userscripts add MusicBrainz artist and release links beside them.
+      const own = (el, selector) => [...(el?.querySelectorAll(selector) || [])].filter((a) => linkUrl(a)?.hostname === location.hostname);
       let card = link.parentElement;
-      for (let depth = 0; card && depth < 5 && !card.querySelector('a[href*="/artist/"]'); depth++) card = card.parentElement;
-      const items = new Set([...(card?.querySelectorAll('a[href*="/master/"], a[href*="/release/"]') || [])].map((other) => other.getAttribute("href").match(/\/(?:master|release)\/(\d+)/)?.[1]));
+      for (let depth = 0; card && depth < 5 && !own(card, 'a[href*="/artist/"]').length; depth++) card = card.parentElement;
+      const items = new Set(own(card, 'a[href*="/master/"], a[href*="/release/"]').map((other) => other.getAttribute("href").match(/\/(?:master|release)\/(\d+)/)?.[1]));
       if (!pageArtist && items.size > 1) return { skip: true };
-      const artist = discogsName(pageArtist || card?.querySelector('a[href*="/artist/"]')?.textContent || "");
+      const artist = discogsName(pageArtist || own(card, 'a[href*="/artist/"]')[0]?.textContent || "");
       if (!artist) return { skip: true };
       const item = { artists: [artist], title: label };
       return { group: lookupAlbum(index, item.artists, [label]), how: "artist and title", label: `${artist} – ${label}`, item };
@@ -2386,6 +2388,11 @@
     markAlbums(index, hrefs, albums);
   }
 
+  // Discogs draws a missing cover as a placeholder box: in search with hidden text ("Cover art missing: …") that isn't a
+  // title, in collections as an icon with no text.
+  const COVER = "img, .hifi-catalog-image-placeholder, [class*='_fallback_']";
+  const coverOf = (el) => el.querySelector(COVER);
+
   // Most sites link each item from a URL that names it. keyOf(url) names the item (null for other links), and
   // find(index, link, key, label) returns { group, how, item }, where label is the item's title from the link or its
   // cover and item describes it for the ↓ download links. A site can also return the cover box the icons go in.
@@ -2393,7 +2400,9 @@
   // to hold the icons in its corner, otherwise the title. Links remember which item they were marked for, since
   // single-page sites reuse them for other items.
   function linkText(link) {
-    return link.querySelector("img")?.alt?.trim() || link.textContent.replace(/\s+/g, " ").trim();
+    const cover = coverOf(link);
+    if (cover && cover.tagName !== "IMG") return "";
+    return cover?.alt?.trim() || link.textContent.replace(/\s+/g, " ").trim();
   }
 
   function linkTwins(link, selector, key, keyOf, skip) {
@@ -2409,12 +2418,13 @@
   }
 
   function bigCover(el) {
-    const img = el.querySelector("img");
-    return !!img && (Number(img.getAttribute("width")) || img.getBoundingClientRect?.().width || el.parentElement?.getBoundingClientRect?.().width || 0) >= 100;
+    const img = coverOf(el);
+    const box = img?.tagName === "IMG" ? img : img?.parentElement;
+    return !!img && (Number(img.getAttribute("width")) || box?.getBoundingClientRect?.().width || el.parentElement?.getBoundingClientRect?.().width || 0) >= 100;
   }
 
   function preferredLink(link, twins) {
-    const cover = (el) => !!el.querySelector("img");
+    const cover = (el) => !!coverOf(el);
     const titles = twins.filter((twin) => !cover(twin) && twin.textContent.trim());
     if (cover(link)) return bigCover(link) || !titles.length;
     // An empty link (a cover with no art) never carries the marker while the item has a title link.
@@ -2435,7 +2445,7 @@
         const twins = linkTwins(link, selector, key, keyOf, skip);
         if (twins.some((twin) => marked.has(twin)) || !preferredLink(link, twins)) continue;
         marked.add(link);
-        const named = [link, ...twins].filter((el) => !el.querySelector("img") && el.textContent.trim());
+        const named = [link, ...twins].filter((el) => !coverOf(el) && el.textContent.trim());
         const label = [...named, link, ...twins].map(linkText).find(Boolean) || "";
         const found = find(index, link, key, label);
         if (found?.skip) continue;
