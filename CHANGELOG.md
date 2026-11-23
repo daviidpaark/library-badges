@@ -5,6 +5,17 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2026-11-23
+
+### Added
+- **Bandcamp:** The homepage's live sales feed and the album players in Bandcamp Daily articles are marked.
+- **Bandcamp:** Singles, which Bandcamp lists by their track page, are marked in discography grids and sidebars, and a single's own track page gets its badges.
+- **Albums:** Titles match across more spellings: "Instrumentals" and "Instrumental", "A Cappella" and "Acapella", "Remixes", "Remixed" and "Remix", "Volume" and "Vol.", and titles with " - Single", "(Single)", "(featuring …)" or a trailing "feat. …".
+
+### Fixed
+- **Bandcamp:** On a label's album and track pages, the discography sidebar and the "from" album link are matched by each release's own artist instead of the label's name, which never matched and offered downloads under the wrong artist.
+- **Albums:** An "(Instrumental Version)", "(Instrumental Edition)" or "(A Cappella Version)" release is no longer read as the original album, which marked the original as owned when you only had the instrumental, and the other way round.
+
 ## [0.1.10] - 2026-11-14
 
 ### Fixed

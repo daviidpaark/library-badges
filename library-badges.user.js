@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.10
+// @version      0.1.11
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -29,10 +29,10 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.10";
+  const VERSION = "0.1.11";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
-  const INDEX_VERSION = 19;
+  const INDEX_VERSION = 20;
   const FRESHNESS_CHECK = 15 * 60 * 1000;
 
   // The same file runs as a Spicetify extension inside Spotify's desktop app, where there's no userscript manager:
@@ -541,8 +541,17 @@
       .replace(/[\u0300-\u036f]/g, "")
       .toLowerCase()
       .replace(/['"’“”`]/g, "")
+      .replace(/\bvolume\b/g, "vol")
+      .replace(/\binstrumentals\b/g, "instrumental")
+      .replace(/\b(?:a\s*cc?app?ellas?|acc?app?ellas?)\b/g, "acapella")
+      .replace(/\b(instrumental|acapella)\s+(?:version|edition|album|mix)\b/g, "$1")
+      .replace(/\bremix(?:es|ed)\b/g, "remix")
+      .replace(/\s+[-–—]\s+single\s*$/, "")
+      .replace(/(\S)\s+(?:feat|ft|featuring)\.?\s+[^([{]+$/, "$1")
       .replace(/([^\s([{])([([{])/g, "$1 $2")
-      .replace(/\s*[([{][^)\]}]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|special|bonus|clean|explicit|editions?|re-?issue|mono|stereo|versions?|cuts?|box set|collectors?|b[\s-]?sides?|ep|feat|ft|with|dj\s+mix)\b[^)\]}]*[)\]}]/gi, "")
+      // An instrumental or a cappella version is its own release, so its bracket stays unless it's a bundle with more.
+      .replace(/\s*[([{][^)\]}]*\b(?:deluxe|expanded|anniversary|remaster(?:ed|s)?|special|bonus|clean|explicit|editions?|re-?issue|mono|stereo|versions?|cuts?|box set|collectors?|b[\s-]?sides?|ep|single|feat|ft|featuring|with|dj\s+mix)\b[^)\]}]*[)\]}]/gi,
+        (bracket) => (/\b(?:instrumental|acapella)\b/.test(bracket) && !/\b(?:with|and|plus)\b|[+&]/.test(bracket) ? bracket : ""))
       .replace(/\s*[([{]\s*(?:the\s+)?(?:original\s+|official\s+)?(?:(?:video\s+)?game\s+|motion\s+picture\s+|television\s+|tv\s+|series\s+)?(?:soundtrack|score|ost)(?:\s+album)?\s*[)\]}]/gi, "")
       .replace(/\s*[([{]\s*(?:ost|original\s+soundtrack)\s+from\b[^)\]}]*[)\]}]/gi, "")
       .replace(/\s*[([{]\s*(?:original\s+)?music\s+(?:from|for)\s+(?:and\s+inspired\s+by\s+)?(?:the\s+)?(?:original\s+)?(?:motion\s+picture|film|series|game)\b[^)\]}]*[)\]}]/gi, "")
@@ -2190,22 +2199,65 @@
     },
     '[class*="versionsTextWithCoversRow"], [class*="mobileStacked"], [class*="mobileVersions"]');
 
-  // Bandcamp lists albums in artist discography grids, "more from" sidebars, recommendations under albums, track pages
-  // (the album they're from), fan collections, search results and the discover page. The discover page reuses its
-  // cards for other albums when the filters change, so each card remembers which album it was marked for.
-  function bandcampItems() {
+  // Bandcamp lists albums in artist discography grids and "more from" sidebars (singles there link to their track
+  // page), recommendations under albums, track pages (the album they're from), fan collections, search results, the discover page, the homepage's live sales feed and
+  // the players in Bandcamp Daily articles. The discover page reuses its cards for other albums when the filters
+  // change, so each card remembers which album it was marked for.
+  function musicGridArtists(doc, band) {
+    const artists = new Map();
+    for (const item of doc.querySelectorAll(".music-grid-item")) {
+      const href = item.querySelector('a[href*="/album/"], a[href*="/track/"]')?.getAttribute("href");
+      if (href) artists.set(new URL(href, location.href).pathname, item.querySelector(".artist-override")?.textContent.trim() || band);
+    }
+    return artists;
+  }
+
+  // A label's sidebar lists other artists' albums without naming them, so their artists come from the label's
+  // discography page, fetched once per page.
+  let labelArtists = null;
+
+  function bandcampLabelArtists(band, rescan) {
+    if (labelArtists?.page === location.pathname) return labelArtists.artists;
+    labelArtists = { page: location.pathname, artists: null };
+    const entry = labelArtists;
+    fetch("/music", { credentials: "same-origin" })
+      .then((response) => (response.ok ? response.text() : ""))
+      .then((html) => musicGridArtists(new DOMParser().parseFromString(html, "text/html"), band), () => new Map())
+      .then((artists) => {
+        entry.artists = artists;
+        if (labelArtists === entry) rescan();
+      });
+    return null;
+  }
+
+  function bandcampItems(rescan) {
     const band = document.querySelector("#band-name-location .title")?.textContent.trim() || document.querySelector('meta[property="og:site_name"]')?.content || "";
+    const og = document.querySelector('meta[property="og:title"]')?.content || "";
+    const pageArtist = og.includes(", by ") ? og.slice(og.lastIndexOf(", by ") + 5).trim() : band;
     const byline = (el) => el?.textContent.replace(/^\s*by\s+/i, "").trim() || "";
     const items = [];
     for (const item of document.querySelectorAll(".music-grid-item")) {
       const titleEl = item.querySelector(".title");
       const override = titleEl?.querySelector(".artist-override");
       const title = [...(titleEl?.childNodes || [])].filter((node) => node !== override).map((node) => node.textContent).join("").trim();
-      items.push({ item, link: item.querySelector('a[href*="/album/"]'), title, artist: override?.textContent.trim() || band });
+      items.push({ item, link: item.querySelector('a[href*="/album/"], a[href*="/track/"]'), title, artist: override?.textContent.trim() || band });
     }
-    for (const item of document.querySelectorAll(".trackTitle")) {
+    const sidebar = document.querySelectorAll("#discography .trackTitle");
+    const sidebarArtists = sidebar.length && pageArtist !== band ? bandcampLabelArtists(band, rescan) : null;
+    for (const item of sidebar) {
+      const link = item.querySelector('a[href*="/album/"], a[href*="/track/"]');
+      const artist = pageArtist === band ? band : sidebarArtists?.get(link ? linkUrl(link)?.pathname : "");
+      items.push({ item, link, title: link?.textContent.trim(), artist, poster: item.closest("li")?.querySelector("a.thumbthumb") });
+    }
+    // Physical sales name the package instead of the album; only digital sales show the album's own art.
+    for (const item of document.querySelectorAll(".salesfeed li.item")) {
+      if (!/\/img\/a\d+_/.test(item.querySelector(".item-img img")?.getAttribute("src") || "")) continue;
       const link = item.querySelector('a[href*="/album/"]');
-      items.push({ item, link, title: link?.textContent.trim(), artist: band, poster: item.closest("li")?.querySelector("a.thumbthumb") });
+      items.push({ item, link, title: item.querySelector("cite")?.textContent.trim(), artist: byline(item.querySelector(".item-artist")), poster: item.querySelector(".item-img") });
+    }
+    for (const item of document.querySelectorAll(".mplayer .mpalbuminfo")) {
+      const link = item.querySelector('a.mptralbum[href*="/album/"]');
+      items.push({ item, link, title: link?.textContent.trim(), artist: item.querySelector(".mpartist")?.textContent.trim() });
     }
     for (const item of document.querySelectorAll("li.recommended-album")) {
       items.push({ item, link: item.querySelector("a.album-link"), title: item.dataset.albumtitle, artist: item.dataset.artist, poster: item.querySelector(".album-art-container") });
@@ -2228,13 +2280,17 @@
       items.push({ item, link: item.querySelector('a.stretch-link[href*="/album/"]'), title, artist: byline(item.querySelector(".attribution-meta")), poster: item.querySelector(".image-container") });
     }
     const nameLink = document.querySelector('#name-section a[href*="/album/"]');
-    if (nameLink) items.push({ item: nameLink, link: nameLink, title: nameLink.textContent.trim(), artist: band });
+    if (nameLink) items.push({ item: nameLink, link: nameLink, title: nameLink.textContent.trim(), artist: pageArtist });
     return items;
   }
 
   function scanBandcamp(index, hrefs) {
     trackTallyPage();
-    for (const { item, link, key: itemKey, title, artist, poster } of bandcampItems()) {
+    const rescan = () => {
+      scanBandcamp(index, hrefs);
+      renderTally();
+    };
+    for (const { item, link, key: itemKey, title, artist, poster } of bandcampItems(rescan)) {
       const url = !itemKey && link ? linkUrl(link) : null;
       const key = itemKey || (url && url.origin + url.pathname);
       if (!link || !key || !title || !artist) continue;
@@ -3003,8 +3059,10 @@
     };
   }
 
+  // A track page without a "from" album link is a single released on its own.
   function parseBandcamp() {
-    if (!currentPath().startsWith("/album/")) return null;
+    const single = currentPath().startsWith("/track/") && !document.querySelector('#name-section a[href*="/album/"]');
+    if (!currentPath().startsWith("/album/") && !single) return null;
     const anchor = document.querySelector("#name-section h2.trackTitle, #name-section h2");
     const og = document.querySelector('meta[property="og:title"]')?.content || "";
     const split = og.lastIndexOf(", by ");

@@ -155,7 +155,9 @@ Titles are compared without the wording that varies between editions and service
 - full-width characters;
 - a leading artist name ("Gingerbee at Thalia Hall" matches "At Thalia Hall");
 - "Live at" wording in a subtitle or at the start ("A Night at the Symphony: Live at the Hollywood Bowl" matches "…: Hollywood Bowl", "Dua Lipa - Live from the Royal Albert Hall" matches "Live from the Royal Albert Hall");
-- "(Original Soundtrack Album)", a trailing "Original Motion Picture Score", "(OST from …)" and "(DJ Mix)", and "Pt. 2" read as "2".
+- "(Original Soundtrack Album)", a trailing "Original Motion Picture Score", "(OST from …)" and "(DJ Mix)", and "Pt. 2" read as "2";
+- single and featured-artist wording: " - Single", "(Single)", "(featuring …)" and a trailing "feat. …" or "ft. …";
+- spelling variants: "Instrumentals" and "Instrumental Version" read as "Instrumental", "A Cappella" and "Acapella" match, "Remixes" and "Remixed" read as "Remix", and "Volume" as "Vol.". An instrumental or a cappella version keeps that word, so it never matches the original album.
 
 Artists named differently from the library still match the same title: a full name finds the library's shorter one ("Stella Katherine Cole" finds "Stella Cole", "Samia Finnerty" finds "Samia"), a family name written first finds the usual order ("Aoba Ichiko" finds "Ichiko Aoba"), a library name with a disambiguation suffix is found without it ("Ugly" finds "Ugly (UK)"), and a compilation credited to "Various" finds the one album in your library with that title. A release that combines two ("Towards The End / Where To Find Me", "Folklore I & II") counts when you have either part, and a title also finds a longer library title by the same artist that ends with it ("Louder, Please" finds "A Little Louder, Please").
 
