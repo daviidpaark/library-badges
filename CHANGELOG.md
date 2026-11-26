@@ -5,6 +5,11 @@ All notable changes to `library-badges` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2026-11-26
+
+### Fixed
+- **Bandcamp:** Albums on artist and label pages match again when a MusicBrainz userscript adds its links to the band name or album titles; their text was read as part of the artist's name, so owned albums showed as missing or "Not sure". Search, discover and collection titles ignore those links too.
+
 ## [0.1.11] - 2026-11-23
 
 ### Added

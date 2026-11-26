@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Library Badges
 // @namespace    https://github.com/daviidpaark/library-badges
-// @version      0.1.11
+// @version      0.1.12
 // @description  Shows whether albums on RateYourMusic, MusicBrainz, Bandcamp, Album of the Year, Discogs, Spotify, The Fork and The Drop, films on Letterboxd and videos on YouTube are in your Navidrome, Plex, Jellyfin or Spotify library, with links to download or add what you are missing.
 // @author       daviidpaark
 // @match        https://rateyourmusic.com/*
@@ -29,7 +29,7 @@
 (function () {
   "use strict";
 
-  const VERSION = "0.1.11";
+  const VERSION = "0.1.12";
   const INDEX_TTL = 6 * 60 * 60 * 1000;
   const INDEX_PAGE = 1000;
   const INDEX_VERSION = 20;
@@ -2231,7 +2231,7 @@
   }
 
   function bandcampItems(rescan) {
-    const band = document.querySelector("#band-name-location .title")?.textContent.trim() || document.querySelector('meta[property="og:site_name"]')?.content || "";
+    const band = ownText(document.querySelector("#band-name-location .title")) || document.querySelector('meta[property="og:site_name"]')?.content || "";
     const og = document.querySelector('meta[property="og:title"]')?.content || "";
     const pageArtist = og.includes(", by ") ? og.slice(og.lastIndexOf(", by ") + 5).trim() : band;
     const byline = (el) => el?.textContent.replace(/^\s*by\s+/i, "").trim() || "";
@@ -2239,7 +2239,7 @@
     for (const item of document.querySelectorAll(".music-grid-item")) {
       const titleEl = item.querySelector(".title");
       const override = titleEl?.querySelector(".artist-override");
-      const title = [...(titleEl?.childNodes || [])].filter((node) => node !== override).map((node) => node.textContent).join("").trim();
+      const title = ownText(titleEl);
       items.push({ item, link: item.querySelector('a[href*="/album/"], a[href*="/track/"]'), title, artist: override?.textContent.trim() || band });
     }
     const sidebar = document.querySelectorAll("#discography .trackTitle");
@@ -2247,7 +2247,7 @@
     for (const item of sidebar) {
       const link = item.querySelector('a[href*="/album/"], a[href*="/track/"]');
       const artist = pageArtist === band ? band : sidebarArtists?.get(link ? linkUrl(link)?.pathname : "");
-      items.push({ item, link, title: link?.textContent.trim(), artist, poster: item.closest("li")?.querySelector("a.thumbthumb") });
+      items.push({ item, link, title: ownText(link) || link?.textContent.trim(), artist, poster: item.closest("li")?.querySelector("a.thumbthumb") });
     }
     // Physical sales name the package instead of the album; only digital sales show the album's own art.
     for (const item of document.querySelectorAll(".salesfeed li.item")) {
@@ -2268,19 +2268,20 @@
       const poster = item.querySelector(".collection-item-art-container, .tralbum-art-container") || item.querySelector("img")?.closest("div");
       const privateAlbum = titleEl?.classList.contains("private") && item.dataset.tralbumtype === "a";
       const link = privateAlbum ? titleEl : item.querySelector('a[href*="/album/"]');
-      items.push({ item, link, key: privateAlbum ? `bandcamp:album:${item.dataset.tralbumid}` : "", title: titleEl?.firstChild?.textContent.trim(), artist: byline(item.querySelector(".collection-item-artist")), poster });
+      items.push({ item, link, key: privateAlbum ? `bandcamp:album:${item.dataset.tralbumid}` : "", title: ownText(titleEl) || titleEl?.firstChild?.textContent.trim(), artist: byline(item.querySelector(".collection-item-artist")), poster });
     }
     for (const item of document.querySelectorAll("li.searchresult")) {
       if (item.querySelector(".itemtype")?.textContent.trim().toUpperCase() !== "ALBUM") continue;
       const link = item.querySelector(".heading a");
-      items.push({ item, link, title: link?.textContent.trim(), artist: byline(item.querySelector(".subhead")), poster: item.querySelector(".artcont .art") });
+      items.push({ item, link, title: ownText(link) || link?.textContent.trim(), artist: byline(item.querySelector(".subhead")), poster: item.querySelector(".artcont .art") });
     }
     for (const item of document.querySelectorAll("li.tralbum-card")) {
-      const title = item.querySelector(".title")?.textContent.trim();
+      const titleEl = item.querySelector(".title");
+      const title = ownText(titleEl) || titleEl?.textContent.trim();
       items.push({ item, link: item.querySelector('a.stretch-link[href*="/album/"]'), title, artist: byline(item.querySelector(".attribution-meta")), poster: item.querySelector(".image-container") });
     }
     const nameLink = document.querySelector('#name-section a[href*="/album/"]');
-    if (nameLink) items.push({ item: nameLink, link: nameLink, title: nameLink.textContent.trim(), artist: pageArtist });
+    if (nameLink) items.push({ item: nameLink, link: nameLink, title: ownText(nameLink.querySelector(".fromAlbum") || nameLink) || nameLink.textContent.trim(), artist: pageArtist });
     return items;
   }
 
@@ -2393,7 +2394,8 @@
     markAlbums(index, hrefs, spicetifyAppCards(), currentPath() + location.hash);
   }
 
-  // Deemix puts icons drawn as text ("explicit") and tags such as "NEW" inside its titles, so only the title's own text counts.
+  // Deemix puts icons drawn as text ("explicit") and tags such as "NEW" inside its titles, and MusicBrainz userscripts
+  // add links inside Bandcamp's titles and band name, so only an element's own text counts.
   function ownText(el) {
     return [...(el?.childNodes || [])].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join("").trim();
   }
